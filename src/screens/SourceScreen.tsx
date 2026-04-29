@@ -14,6 +14,7 @@ import {
   Check,
   Database,
   Download,
+  History,
   HeartPulse,
   Lock,
   Moon,
@@ -28,7 +29,7 @@ import {
 import { ranges } from '../core/constants';
 import { dataAge, formatDateKey, formatNumber, metricLabel } from '../core/formatters';
 import { availabilityForTypes } from '../core/metricAvailability';
-import type { LastSync } from '../core/types';
+import type { LastSync, SyncRuns } from '../core/types';
 import {
   currentHealthProviderLabel,
   openCurrentPlatformHealthSettings,
@@ -40,7 +41,7 @@ import type {
   PipelineSnapshot,
   SourceFreshness,
 } from '../health/types';
-import { formatShortDateTime } from '../lib/dates';
+import { formatRange, formatShortDateTime } from '../lib/dates';
 import type { AppSettings } from '../storage/appSettings';
 import { styles } from '../styles/appStyles';
 import { tokens } from '../theme/tokens';
@@ -139,6 +140,69 @@ function SourceFreshnessRow({ source }: { source: SourceFreshness }) {
   );
 }
 
+function providerName(provider: string): string {
+  if (provider === 'healthkit') {
+    return 'Apple Health';
+  }
+
+  if (provider === 'health_connect') {
+    return 'Health Connect';
+  }
+
+  return provider;
+}
+
+function syncRunRangeLabel(run: NonNullable<LastSync>): string {
+  return formatRange({
+    startDate: new Date(run.range_start),
+    endDate: new Date(run.range_end),
+  });
+}
+
+function SyncRunHistoryRow({ run }: { run: SyncRuns[number] }) {
+  const statusOk = run.status === 'ok';
+  const detailParts = [
+    providerName(run.provider),
+    run.sync_type === 'incremental' ? 'Incremental' : 'Manual',
+    syncRunRangeLabel(run),
+  ];
+  const countParts = [
+    `${run.sample_count.toLocaleString()} records`,
+    `${run.health_sample_count.toLocaleString()} samples`,
+    `${run.workout_count.toLocaleString()} workouts`,
+    `${run.sleep_session_count.toLocaleString()} sleep`,
+    `${run.nutrition_day_count.toLocaleString()} nutrition`,
+  ];
+
+  return (
+    <View style={styles.syncRunRow}>
+      <View style={styles.syncRunTopLine}>
+        <View style={styles.syncRunTitleWrap}>
+          <Text style={styles.syncRunTitle}>{formatShortDateTime(run.started_at)}</Text>
+          <Text style={styles.syncRunDetail}>{detailParts.join(' · ')}</Text>
+        </View>
+        <View style={[styles.syncRunBadge, statusOk ? styles.syncRunBadgeOk : styles.syncRunBadgeError]}>
+          <Text
+            style={[
+              styles.syncRunBadgeText,
+              statusOk ? styles.syncRunBadgeTextOk : styles.syncRunBadgeTextError,
+            ]}
+          >
+            {statusOk ? 'OK' : 'Error'}
+          </Text>
+        </View>
+      </View>
+      <Text style={styles.syncRunCounts}>{countParts.join(' · ')}</Text>
+      {run.warning_count || run.diagnostic_count ? (
+        <Text style={styles.syncRunDetail}>
+          {`${run.warning_count.toLocaleString()} warnings · ${run.diagnostic_count.toLocaleString()} diagnostics`}
+        </Text>
+      ) : null}
+      {run.error ? <Text style={styles.syncRunError}>{run.error}</Text> : null}
+    </View>
+  );
+}
+
 function hasDiagnosticSamples(
   diagnostics: HealthConnectReadDiagnostic[],
   types: CanonicalType[],
@@ -152,6 +216,8 @@ function hasDiagnosticSamples(
 export function SourceScreen({
   snapshot,
   lastSync,
+  lastSuccessfulSync,
+  recentSyncRuns,
   appSettings,
   apiKeyDraft,
   settingsBusy,
@@ -161,6 +227,7 @@ export function SourceScreen({
   setRangeDays,
   setApiKeyDraft,
   onSync,
+  onIncrementalSync,
   onExport,
   onClear,
   onSaveApiKey,
@@ -169,6 +236,8 @@ export function SourceScreen({
 }: {
   snapshot: PipelineSnapshot;
   lastSync: LastSync;
+  lastSuccessfulSync: LastSync;
+  recentSyncRuns: SyncRuns;
   appSettings: AppSettings;
   apiKeyDraft: string;
   settingsBusy: boolean;
@@ -178,6 +247,7 @@ export function SourceScreen({
   setRangeDays: (value: number) => void;
   setApiKeyDraft: (value: string) => void;
   onSync: () => void;
+  onIncrementalSync: () => void;
   onExport: () => void;
   onClear: () => void;
   onSaveApiKey: () => void;
@@ -297,6 +367,14 @@ export function SourceScreen({
             variant="primary"
           />
           <AppButton
+            disabled={busy || !lastSuccessfulSync}
+            icon={History}
+            label="Incremental"
+            onPress={onIncrementalSync}
+          />
+        </View>
+        <View style={styles.actionsRow}>
+          <AppButton
             disabled={busy || snapshot.totalSamples === 0}
             icon={Download}
             label="Export"
@@ -321,6 +399,17 @@ export function SourceScreen({
             onPress={onClear}
             variant="danger"
           />
+        </View>
+
+        <SectionLabel>Recent sync runs</SectionLabel>
+        <View style={styles.syncRunList}>
+          {recentSyncRuns.length ? (
+            recentSyncRuns.map((run) => (
+              <SyncRunHistoryRow key={run.id} run={run} />
+            ))
+          ) : (
+            <Text style={styles.emptyText}>No sync runs recorded yet.</Text>
+          )}
         </View>
 
         <AnalyticsPanel lastSync={lastSync} snapshot={snapshot} />

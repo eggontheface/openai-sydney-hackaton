@@ -108,13 +108,30 @@ export type SleepSessionRow = {
 export type SyncRunRow = {
   id: number;
   provider: HealthProvider;
+  sync_type: 'manual' | 'incremental';
   started_at: string;
   ended_at: string;
   range_start: string;
   range_end: string;
   sample_count: number;
+  health_sample_count: number;
+  workout_count: number;
+  sleep_session_count: number;
+  nutrition_day_count: number;
+  warning_count: number;
+  diagnostic_count: number;
   status: 'ok' | 'error';
   error: string | null;
+};
+
+export type SyncRunDetails = {
+  syncType?: SyncRunRow['sync_type'];
+  healthSampleCount?: number;
+  workoutCount?: number;
+  sleepSessionCount?: number;
+  nutritionDayCount?: number;
+  warningCount?: number;
+  diagnosticCount?: number;
 };
 
 type HealthConnectDiagnosticRow = {
@@ -1439,11 +1456,18 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     CREATE TABLE IF NOT EXISTS sync_runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       provider TEXT NOT NULL,
+      sync_type TEXT NOT NULL DEFAULT 'manual',
       started_at TEXT NOT NULL,
       ended_at TEXT NOT NULL,
       range_start TEXT NOT NULL,
       range_end TEXT NOT NULL,
       sample_count INTEGER NOT NULL,
+      health_sample_count INTEGER NOT NULL DEFAULT 0,
+      workout_count INTEGER NOT NULL DEFAULT 0,
+      sleep_session_count INTEGER NOT NULL DEFAULT 0,
+      nutrition_day_count INTEGER NOT NULL DEFAULT 0,
+      warning_count INTEGER NOT NULL DEFAULT 0,
+      diagnostic_count INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL,
       error TEXT
     );
@@ -1484,6 +1508,7 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
   await addMissingColumns(db, 'nutrition_daily', nutritionDailyAddedColumns);
   await addMissingColumns(db, 'daily_metrics', dailyMetricsAddedNutritionColumns);
   await ensureHrvSchema(db);
+  await ensureSyncRunColumns(db);
 
   const legacyColumns = await db.getAllAsync<{ name: string }>(
     'PRAGMA table_info(health_samples_legacy)',
@@ -1525,6 +1550,36 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
 
     await db.execAsync('DROP TABLE health_samples_legacy;');
   }
+}
+
+async function ensureSyncRunColumns(db: SQLite.SQLiteDatabase): Promise<void> {
+  const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(sync_runs)');
+  const present = new Set(columns.map((column) => column.name));
+  const additions: Record<string, string> = {
+    sync_type: "TEXT NOT NULL DEFAULT 'manual'",
+    health_sample_count: 'INTEGER NOT NULL DEFAULT 0',
+    workout_count: 'INTEGER NOT NULL DEFAULT 0',
+    sleep_session_count: 'INTEGER NOT NULL DEFAULT 0',
+    nutrition_day_count: 'INTEGER NOT NULL DEFAULT 0',
+    warning_count: 'INTEGER NOT NULL DEFAULT 0',
+    diagnostic_count: 'INTEGER NOT NULL DEFAULT 0',
+  };
+
+  for (const [name, definition] of Object.entries(additions)) {
+    if (!present.has(name)) {
+      await db.execAsync(`ALTER TABLE sync_runs ADD COLUMN ${name} ${definition};`);
+    }
+  }
+
+  await db.runAsync(`
+    UPDATE sync_runs
+    SET health_sample_count = sample_count
+    WHERE sample_count > 0
+      AND health_sample_count = 0
+      AND workout_count = 0
+      AND sleep_session_count = 0
+      AND nutrition_day_count = 0
+  `);
 }
 
 export async function initTrainingStore(): Promise<void> {
@@ -1824,6 +1879,7 @@ export async function recordSyncRun(
   sampleCount: number,
   startedAt: string,
   error?: unknown,
+  details: SyncRunDetails = {},
 ): Promise<void> {
   const db = await getDb();
   const endedAt = new Date().toISOString();
@@ -1831,17 +1887,25 @@ export async function recordSyncRun(
   await db.runAsync(
     `
       INSERT INTO sync_runs (
-        provider, started_at, ended_at, range_start, range_end,
-        sample_count, status, error
+        provider, sync_type, started_at, ended_at, range_start, range_end,
+        sample_count, health_sample_count, workout_count, sleep_session_count,
+        nutrition_day_count, warning_count, diagnostic_count, status, error
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     provider,
+    details.syncType ?? 'manual',
     startedAt,
     endedAt,
     range.startDate.toISOString(),
     range.endDate.toISOString(),
     sampleCount,
+    details.healthSampleCount ?? sampleCount,
+    details.workoutCount ?? 0,
+    details.sleepSessionCount ?? 0,
+    details.nutritionDayCount ?? 0,
+    details.warningCount ?? 0,
+    details.diagnosticCount ?? 0,
     error ? 'error' : 'ok',
     error ? String(error instanceof Error ? error.message : error) : null,
   );
@@ -2596,6 +2660,21 @@ export async function getLastSyncRun(): Promise<SyncRunRow | null> {
   const db = await getDb();
   return db.getFirstAsync<SyncRunRow>(
     'SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1',
+  );
+}
+
+export async function getLastSuccessfulSyncRun(): Promise<SyncRunRow | null> {
+  const db = await getDb();
+  return db.getFirstAsync<SyncRunRow>(
+    "SELECT * FROM sync_runs WHERE status = 'ok' ORDER BY ended_at DESC, id DESC LIMIT 1",
+  );
+}
+
+export async function getRecentSyncRuns(limit = 6): Promise<SyncRunRow[]> {
+  const db = await getDb();
+  return db.getAllAsync<SyncRunRow>(
+    'SELECT * FROM sync_runs ORDER BY ended_at DESC, id DESC LIMIT ?',
+    limit,
   );
 }
 

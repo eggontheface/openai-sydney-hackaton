@@ -1412,6 +1412,77 @@ export const styles = StyleSheet.create({
     lineHeight: 16,
     marginTop: 2,
   },
+  syncRunList: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  syncRunRow: {
+    borderBottomColor: tokens.lineSoft,
+    borderBottomWidth: 1,
+    gap: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  syncRunTopLine: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between',
+  },
+  syncRunTitleWrap: {
+    flex: 1,
+  },
+  syncRunTitle: {
+    color: tokens.ink,
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  syncRunDetail: {
+    color: tokens.muted,
+    fontSize: 11,
+    letterSpacing: 0,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  syncRunCounts: {
+    color: tokens.inkSoft,
+    fontSize: 11,
+    letterSpacing: 0,
+    lineHeight: 16,
+  },
+  syncRunError: {
+    color: tokens.danger,
+    fontSize: 11,
+    letterSpacing: 0,
+    lineHeight: 16,
+  },
+  syncRunBadge: {
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  syncRunBadgeOk: {
+    backgroundColor: tokens.accentSoft,
+  },
+  syncRunBadgeError: {
+    backgroundColor: '#fff4f2',
+  },
+  syncRunBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0,
+    textTransform: 'uppercase',
+  },
+  syncRunBadgeTextOk: {
+    color: tokens.accentDeep,
+  },
+  syncRunBadgeTextError: {
+    color: tokens.danger,
+  },
   toggle: {
     backgroundColor: tokens.line,
     borderRadius: 8,

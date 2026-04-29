@@ -5,14 +5,14 @@ import { Alert, Keyboard, KeyboardAvoidingView, Platform, SafeAreaView } from 'r
 import { openAiCoachModel, sendCoachMessage } from './src/ai/openaiCoach';
 import { createCoachMessage, toOpenAiConversation } from './src/core/coachConversation';
 import { baselineRangeDays, emptyAppSettings, emptySnapshot } from './src/core/constants';
-import type { CoachConversationMessage, LastSync, Tab } from './src/core/types';
+import type { CoachConversationMessage, LastSync, SyncRuns, Tab } from './src/core/types';
 import { CoachOnboardingScreen } from './src/screens/CoachOnboardingScreen';
 import { CoachScreen } from './src/screens/CoachScreen';
 import { HistoryScreen } from './src/screens/HistoryScreen';
 import { SourceScreen } from './src/screens/SourceScreen';
 import { WorkoutPlanScreen } from './src/screens/WorkoutPlanScreen';
 import { currentHealthProviderId, currentHealthProviderLabel, syncCurrentPlatform } from './src/health/syncPipeline';
-import type { PipelineSnapshot } from './src/health/types';
+import type { PipelineSnapshot, SyncRange } from './src/health/types';
 import { formatRange, makeSyncRange } from './src/lib/dates';
 import {
   clearOpenAiApiKey,
@@ -27,7 +27,9 @@ import {
   exportPipelineJson,
   getCoachHealthContext,
   getLastSyncRun,
+  getLastSuccessfulSyncRun,
   getPipelineSnapshot,
+  getRecentSyncRuns,
   initTrainingStore,
   recordSyncRun,
   upsertSyncPayload,
@@ -42,6 +44,8 @@ export default function App() {
   const [goalText, setGoalText] = useState('');
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
   const [lastSync, setLastSync] = useState<LastSync>(null);
+  const [lastSuccessfulSync, setLastSuccessfulSync] = useState<LastSync>(null);
+  const [recentSyncRuns, setRecentSyncRuns] = useState<SyncRuns>([]);
   const [appSettings, setAppSettings] = useState<AppSettings>(emptyAppSettings);
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [coachDraft, setCoachDraft] = useState('');
@@ -58,12 +62,16 @@ export default function App() {
   const canSync = Platform.OS === 'ios' || Platform.OS === 'android';
 
   async function refreshStore() {
-    const [nextSnapshot, nextLastSync] = await Promise.all([
+    const [nextSnapshot, nextLastSync, nextLastSuccessfulSync, nextRecentSyncRuns] = await Promise.all([
       getPipelineSnapshot(),
       getLastSyncRun(),
+      getLastSuccessfulSyncRun(),
+      getRecentSyncRuns(),
     ]);
     setSnapshot(nextSnapshot);
     setLastSync(nextLastSync);
+    setLastSuccessfulSync(nextLastSuccessfulSync);
+    setRecentSyncRuns(nextRecentSyncRuns);
   }
 
   useEffect(() => {
@@ -179,7 +187,27 @@ export default function App() {
     }
   }
 
-  async function runSync() {
+  function makeIncrementalSyncRange(lastSuccessful: LastSync): SyncRange | null {
+    if (!lastSuccessful) {
+      return null;
+    }
+
+    const startDate = new Date(lastSuccessful.range_end);
+    if (Number.isNaN(startDate.getTime())) {
+      return null;
+    }
+
+    startDate.setHours(0, 0, 0, 0);
+    const endDate = new Date();
+    if (startDate.getTime() > endDate.getTime()) {
+      startDate.setTime(endDate.getTime());
+      startDate.setHours(0, 0, 0, 0);
+    }
+
+    return { startDate, endDate };
+  }
+
+  async function runSync(syncType: 'manual' | 'incremental' = 'manual') {
     if (!canSync) {
       setStatus('Use an iOS or Android dev build.');
       return;
@@ -187,21 +215,36 @@ export default function App() {
 
     const provider = currentHealthProviderId();
     const startedAt = new Date().toISOString();
+    const syncRange =
+      syncType === 'incremental' ? makeIncrementalSyncRange(lastSuccessfulSync) : range;
+
+    if (!syncRange) {
+      setStatus('Run a manual sync before incremental sync.');
+      return;
+    }
 
     setBusy(true);
     setWarnings([]);
-    setStatus(`Syncing ${formatRange(range)}`);
+    setStatus(`Syncing ${formatRange(syncRange)}`);
 
     try {
-      const result = await syncCurrentPlatform(range);
+      const result = await syncCurrentPlatform(syncRange);
       const saved = await upsertSyncPayload(result);
-      await recordSyncRun(result.provider, range, saved, startedAt);
+      await recordSyncRun(result.provider, syncRange, saved, startedAt, undefined, {
+        syncType,
+        healthSampleCount: result.samples.length,
+        workoutCount: result.workouts.length,
+        sleepSessionCount: result.sleepSessions.length,
+        nutritionDayCount: result.nutritionDaily.length,
+        warningCount: result.warnings.length,
+        diagnosticCount: result.diagnostics.length,
+      });
       setWarnings(result.warnings);
       setStatus(`Synced ${saved.toLocaleString()} records`);
       await refreshStore();
     } catch (error) {
       if (provider) {
-        await recordSyncRun(provider, range, 0, startedAt, error);
+        await recordSyncRun(provider, syncRange, 0, startedAt, error, { syncType });
       }
       setStatus(String(error instanceof Error ? error.message : error));
       await refreshStore();
@@ -285,13 +328,16 @@ export default function App() {
             appSettings={appSettings}
             busy={busy}
             lastSync={lastSync}
+            lastSuccessfulSync={lastSuccessfulSync}
             onClear={confirmClear}
             onClearApiKey={removeApiKey}
             onExport={runExport}
+            onIncrementalSync={() => void runSync('incremental')}
             onSaveApiKey={saveApiKey}
             onSetDefaultRange={setDefaultSyncRange}
             onSync={runSync}
             rangeDays={rangeDays}
+            recentSyncRuns={recentSyncRuns}
             setApiKeyDraft={setApiKeyDraft}
             setRangeDays={setRangeDays}
             settingsBusy={settingsBusy}

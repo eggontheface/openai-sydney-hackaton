@@ -1,9 +1,10 @@
 import type { LucideIcon } from 'lucide-react-native';
 
 import type { CanonicalType } from '../health/types';
-import type { getLastSyncRun } from '../storage/trainingStore';
+import type { getLastSyncRun, getRecentSyncRuns } from '../storage/trainingStore';
 
 export type LastSync = Awaited<ReturnType<typeof getLastSyncRun>>;
+export type SyncRuns = Awaited<ReturnType<typeof getRecentSyncRuns>>;
 export type Tab = 'coach' | 'workout' | 'history' | 'you';
 export type OnboardingStepId = 'data' | 'analysis' | 'goal' | 'event' | 'constraints';
 
