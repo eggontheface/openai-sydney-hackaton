@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen } from '@testing-library/react-native';
 import { Text } from 'react-native';
 
 import { availabilityForTypes } from '../core/metricAvailability';
@@ -7,6 +7,7 @@ import { CoachOnboardingScreen } from '../screens/CoachOnboardingScreen';
 import { CoachScreen } from '../screens/CoachScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { SourceScreen } from '../screens/SourceScreen';
+import { SplashScreen, StartLoadingScreen } from '../screens/SplashScreen';
 import { WorkoutPlanScreen } from '../screens/WorkoutPlanScreen';
 import { DataCard, SmallMetric } from '../ui/primitives';
 import { TabBar } from '../ui/TabBar';
@@ -20,7 +21,29 @@ describe('app module structure', () => {
     expect(typeof AnalyticsScreen).toBe('function');
     expect(typeof HistoryScreen).toBe('function');
     expect(typeof SourceScreen).toBe('function');
+    expect(typeof SplashScreen).toBe('function');
+    expect(typeof StartLoadingScreen).toBe('function');
     expect(typeof TabBar).toBe('function');
+  });
+
+  it('offers splash entry points for onboarding or direct health sync start', () => {
+    const onStartOnboarding = jest.fn();
+    const onSyncAndStart = jest.fn();
+
+    render(<SplashScreen busy={false} onStartOnboarding={onStartOnboarding} onSyncAndStart={onSyncAndStart} sourceLabel="Health Connect" status="Ready" />);
+
+    fireEvent.press(screen.getByText('Onboarding'));
+    fireEvent.press(screen.getByText('Sync data & start'));
+
+    expect(onStartOnboarding).toHaveBeenCalledTimes(1);
+    expect(onSyncAndStart).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders a start loading state while direct sync is running', () => {
+    render(<StartLoadingScreen sourceLabel="Health Connect" status="Syncing Apr 23 to Apr 29" />);
+
+    expect(screen.getByText('Loading')).toBeOnTheScreen();
+    expect(screen.getByText('Syncing Apr 23 to Apr 29')).toBeOnTheScreen();
   });
 
   it('renders shared UI primitives after extraction', () => {
