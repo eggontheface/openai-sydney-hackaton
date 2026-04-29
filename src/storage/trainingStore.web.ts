@@ -1,7 +1,9 @@
 import type {
   CanonicalType,
   DailyMetrics,
+  HealthConnectReadDiagnostic,
   HealthProvider,
+  MetricAvailability,
   PipelineSnapshot,
   SyncPayload,
   SyncRange,
@@ -111,12 +113,68 @@ function day(offset = 0): DailyMetrics {
 }
 
 const history = Array.from({ length: 14 }, (_, index) => day(-index));
+const latestDate = dateKey(0);
+
+const demoMetricAvailability: MetricAvailability[] = [
+  { canonicalType: 'sleep_session', sampleCount: 14, dayCount: 14, latestDate },
+  { canonicalType: 'hrv_rmssd', sampleCount: 14, dayCount: 14, latestDate },
+  { canonicalType: 'resting_heart_rate', sampleCount: 14, dayCount: 14, latestDate },
+  { canonicalType: 'heart_rate', sampleCount: 96, dayCount: 14, latestDate },
+  { canonicalType: 'workout', sampleCount: 9, dayCount: 7, latestDate: dateKey(-1) },
+  { canonicalType: 'steps', sampleCount: 14, dayCount: 14, latestDate },
+  { canonicalType: 'active_energy', sampleCount: 14, dayCount: 14, latestDate },
+  { canonicalType: 'distance', sampleCount: 14, dayCount: 14, latestDate },
+  { canonicalType: 'nutrition', sampleCount: 8, dayCount: 8, latestDate },
+  { canonicalType: 'hydration', sampleCount: 8, dayCount: 8, latestDate },
+  { canonicalType: 'weight', sampleCount: 4, dayCount: 4, latestDate: dateKey(-1) },
+  { canonicalType: 'body_fat', sampleCount: 4, dayCount: 4, latestDate: dateKey(-1) },
+  { canonicalType: 'lean_body_mass', sampleCount: 4, dayCount: 4, latestDate: dateKey(-1) },
+  { canonicalType: 'vo2max', sampleCount: 2, dayCount: 2, latestDate: dateKey(-2) },
+];
+
+const demoDiagnostics: HealthConnectReadDiagnostic[] = [
+  {
+    recordType: 'SleepSession',
+    canonicalType: 'sleep_session',
+    permission: 'granted',
+    readKind: 'records',
+    recordsRead: 14,
+    samplesWritten: 14,
+  },
+  {
+    recordType: 'HeartRate',
+    canonicalType: 'heart_rate',
+    permission: 'granted',
+    readKind: 'records',
+    recordsRead: 96,
+    samplesWritten: 96,
+  },
+  {
+    recordType: 'RestingHeartRate',
+    canonicalType: 'resting_heart_rate',
+    permission: 'granted',
+    readKind: 'records',
+    recordsRead: 14,
+    samplesWritten: 14,
+  },
+  {
+    recordType: 'HeartRateVariabilityRmssd',
+    canonicalType: 'hrv_rmssd',
+    permission: 'granted',
+    readKind: 'records',
+    recordsRead: 14,
+    samplesWritten: 14,
+  },
+];
 
 const demoSnapshot: PipelineSnapshot = {
   totalSamples: 428,
   workoutCount: 9,
   sleepCount: 14,
   nutritionDays: 8,
+  coverageDays: history.length,
+  metricAvailability: demoMetricAvailability,
+  latestDiagnostics: demoDiagnostics,
   today: history[0],
   history,
   recentWorkouts: [
@@ -212,6 +270,92 @@ export async function recordSyncRun(
 
 export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
   return demoSnapshot;
+}
+
+function demoTableCount(total: number, firstDate: string | null, latestDate: string | null) {
+  return {
+    total,
+    first_date: firstDate,
+    latest_date: latestDate,
+  };
+}
+
+export async function getCoachHealthContext(_options: { rebuildDaily?: boolean } = {}) {
+  const firstDate = dateKey(-13);
+  const syncRuns = lastSync
+    ? {
+        total: 1,
+        latestEndedAt: lastSync.ended_at,
+        latestStatus: lastSync.status,
+        latestSampleCount: lastSync.sample_count,
+        latestRangeStart: lastSync.range_start,
+        latestRangeEnd: lastSync.range_end,
+      }
+    : {
+        total: 0,
+        latestEndedAt: null,
+        latestStatus: null,
+        latestSampleCount: null,
+        latestRangeStart: null,
+        latestRangeEnd: null,
+      };
+
+  return {
+    generatedAt: new Date().toISOString(),
+    hasSyncedHealthData: true,
+    sqliteTables: {
+      healthSamples: demoTableCount(demoSnapshot.totalSamples, firstDate, latestDate),
+      sleepSessions: demoTableCount(demoSnapshot.sleepCount, firstDate, latestDate),
+      workouts: demoTableCount(demoSnapshot.workoutCount, dateKey(-12), dateKey(-1)),
+      nutritionDaily: demoTableCount(demoSnapshot.nutritionDays, dateKey(-12), latestDate),
+      dailyMetrics: demoTableCount(history.length, firstDate, latestDate),
+      syncRuns,
+    },
+    metricAvailability: demoMetricAvailability,
+    latestSamplesByType: [
+      {
+        canonicalType: 'hrv_rmssd' as CanonicalType,
+        recordType: 'HeartRateVariabilityRmssd',
+        sourceApp: 'Apple Watch',
+        localDate: latestDate,
+        startAt: `${latestDate}T06:45:00.000Z`,
+        value: history[0].hrvLastNightAvg,
+        unit: 'ms',
+      },
+      {
+        canonicalType: 'resting_heart_rate' as CanonicalType,
+        recordType: 'RestingHeartRate',
+        sourceApp: 'Apple Watch',
+        localDate: latestDate,
+        startAt: `${latestDate}T06:45:00.000Z`,
+        value: history[0].restingHr,
+        unit: 'bpm',
+      },
+      {
+        canonicalType: 'steps' as CanonicalType,
+        recordType: 'Steps',
+        sourceApp: 'Apple Watch',
+        localDate: latestDate,
+        startAt: `${latestDate}T23:59:00.000Z`,
+        value: history[0].steps,
+        unit: 'count',
+      },
+    ],
+    recentDailyMetrics: demoSnapshot.history.slice(0, 7),
+    recentWorkouts: demoSnapshot.recentWorkouts.slice(0, 5).map((workout) => ({
+      localDate: workout.localDate,
+      name: workout.name,
+      activityType: workout.activityType,
+      sportBucket: workout.sportBucket,
+      elapsedSeconds: workout.elapsedSeconds,
+      distanceKm: workout.distanceKm,
+      activeKcal: workout.activeKcal,
+      avgHrBpm: workout.avgHrBpm,
+      sourceApp: workout.sourceApp,
+    })),
+    coachDataInstruction:
+      'Expo web is using local mock SQLite-style demo data. Treat it as synced demo health data, not live device records.',
+  };
 }
 
 export async function getLastSyncRun(): Promise<SyncRunRow | null> {

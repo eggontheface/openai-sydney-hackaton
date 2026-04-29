@@ -16,6 +16,7 @@
     "expo-build-properties": "~1.0.10",
     "expo-file-system": "~19.0.22",
     "expo-health-connect": "^0.1.1",
+    "expo-secure-store": "~15.0.8",
     "expo-sharing": "~14.0.8",
     "expo-sqlite": "~16.0.10",
     "expo-status-bar": "~3.0.9",

@@ -154,6 +154,7 @@ export async function syncAppleHealth(range: SyncRange): Promise<SyncResult> {
     workouts: [],
     sleepSessions: [],
     nutritionDaily: [],
+    diagnostics: [],
     warnings,
   };
 }
