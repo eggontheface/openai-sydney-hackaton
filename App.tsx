@@ -149,7 +149,7 @@ const emptySnapshot: PipelineSnapshot = {
 };
 
 type LastSync = Awaited<ReturnType<typeof getLastSyncRun>>;
-type Tab = 'coach' | 'workout' | 'analytics' | 'history' | 'you';
+type Tab = 'coach' | 'workout' | 'history' | 'you';
 type OnboardingStepId = 'data' | 'analysis' | 'goal' | 'event' | 'constraints';
 
 type OnboardingSuggestion = {
@@ -1387,7 +1387,7 @@ function ScoreboardRow({
   );
 }
 
-function AnalyticsScreen({ snapshot, lastSync }: { snapshot: PipelineSnapshot; lastSync: LastSync }) {
+function AnalyticsPanel({ snapshot, lastSync }: { snapshot: PipelineSnapshot; lastSync: LastSync }) {
   const scoredMetrics = analyticsMetrics.map((config) => {
     const availability = availabilityForTypes(snapshot.metricAvailability, config.types);
     const diagnostics = diagnosticsForTypes(snapshot.latestDiagnostics, config.types);
@@ -1401,49 +1401,44 @@ function AnalyticsScreen({ snapshot, lastSync }: { snapshot: PipelineSnapshot; l
   const topGaps = scoredMetrics.filter((metric) => metric.status !== 'live').slice(0, 3);
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.pageHeader}>
-        <Text style={styles.pageEyebrow}>Pipeline scoreboard</Text>
-        <Text style={styles.pageTitle}>Analytics</Text>
+    <>
+      <SectionLabel>Analytics</SectionLabel>
+      <View style={styles.summaryGrid}>
+        <SmallMetric label="Coverage days" value={formatNumber(snapshot.coverageDays)} />
+        <SmallMetric label="Live metrics" value={`${liveCount}/${analyticsMetrics.length}`} />
+        <SmallMetric label="Open gaps" value={formatNumber(gapCount)} />
+        <SmallMetric label="Raw samples" value={formatNumber(snapshot.totalSamples)} />
       </View>
-      <ScrollView contentContainerStyle={styles.pageContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.summaryGrid}>
-          <SmallMetric label="Coverage days" value={formatNumber(snapshot.coverageDays)} />
-          <SmallMetric label="Live metrics" value={`${liveCount}/${analyticsMetrics.length}`} />
-          <SmallMetric label="Open gaps" value={formatNumber(gapCount)} />
-          <SmallMetric label="Raw samples" value={formatNumber(snapshot.totalSamples)} />
-        </View>
 
-        <SectionLabel>Data availability</SectionLabel>
-        <View style={styles.scoreList}>
-          {analyticsMetrics.map((config) => (
-            <ScoreboardRow config={config} key={config.id} snapshot={snapshot} />
-          ))}
-        </View>
+      <SectionLabel>Data availability</SectionLabel>
+      <View style={styles.scoreList}>
+        {analyticsMetrics.map((config) => (
+          <ScoreboardRow config={config} key={config.id} snapshot={snapshot} />
+        ))}
+      </View>
 
-        <SectionLabel>Gaps to close</SectionLabel>
-        <View style={styles.gapList}>
-          {topGaps.length ? (
-            topGaps.map(({ config }) => (
-              <View key={config.id} style={styles.gapRow}>
-                <Text style={styles.gapTitle}>{config.title}</Text>
-                <Text style={styles.gapDetail}>{config.gap}</Text>
-              </View>
-            ))
-          ) : (
-            <Text style={styles.emptyText}>Core metrics are available for the current dataset.</Text>
-          )}
-        </View>
+      <SectionLabel>Gaps to close</SectionLabel>
+      <View style={styles.gapList}>
+        {topGaps.length ? (
+          topGaps.map(({ config }) => (
+            <View key={config.id} style={styles.gapRow}>
+              <Text style={styles.gapTitle}>{config.title}</Text>
+              <Text style={styles.gapDetail}>{config.gap}</Text>
+            </View>
+          ))
+        ) : (
+          <Text style={styles.emptyText}>Core metrics are available for the current dataset.</Text>
+        )}
+      </View>
 
-        <View style={styles.privacyCard}>
-          <Database color={tokens.muted} size={16} strokeWidth={2} />
-          <Text style={styles.privacyText}>
-            Scores reflect local records already imported into the on-device SQLite pipeline.
-            {` ${dataAge(lastSync)}.`}
-          </Text>
-        </View>
-      </ScrollView>
-    </View>
+      <View style={styles.privacyCard}>
+        <Database color={tokens.muted} size={16} strokeWidth={2} />
+        <Text style={styles.privacyText}>
+          Scores reflect local records already imported into the on-device SQLite pipeline.
+          {` ${dataAge(lastSync)}.`}
+        </Text>
+      </View>
+    </>
   );
 }
 
@@ -1722,6 +1717,8 @@ function SourceScreen({
             variant="danger"
           />
         </View>
+
+        <AnalyticsPanel lastSync={lastSync} snapshot={snapshot} />
 
         <SectionLabel>Local app settings</SectionLabel>
         <View style={styles.settingsCard}>
@@ -2210,7 +2207,6 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (tab: Tab) => voi
   const tabs: { id: Tab; label: string; icon: LucideIcon }[] = [
     { id: 'coach', label: 'Coach', icon: Sparkles },
     { id: 'workout', label: 'Workout', icon: Dumbbell },
-    { id: 'analytics', label: 'Analytics', icon: ChartColumn },
     { id: 'history', label: 'History', icon: History },
     { id: 'you', label: 'You', icon: User },
   ];
@@ -2486,9 +2482,6 @@ export default function App() {
           />
         ) : null}
         {hasCompletedOnboarding && activeTab === 'workout' ? <WorkoutPlanScreen snapshot={snapshot} /> : null}
-        {hasCompletedOnboarding && activeTab === 'analytics' ? (
-          <AnalyticsScreen lastSync={lastSync} snapshot={snapshot} />
-        ) : null}
         {hasCompletedOnboarding && activeTab === 'history' ? <HistoryScreen snapshot={snapshot} /> : null}
         {hasCompletedOnboarding && activeTab === 'you' ? (
           <SourceScreen
