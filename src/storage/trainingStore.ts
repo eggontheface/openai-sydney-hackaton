@@ -155,6 +155,7 @@ export type SyncRunDetails = {
 export type PipelineExportResult = {
   jsonFileUri: string;
   healthCheckFileUri: string;
+  llmBundleFileUri: string;
 };
 
 type HealthConnectDiagnosticRow = {
@@ -3385,13 +3386,21 @@ export async function exportPipelineArtifacts(): Promise<PipelineExportResult> {
     const goalProfileRow = await db.getFirstAsync<GoalProfileRow>(
       "SELECT * FROM goal_profile WHERE id = 'current' LIMIT 1",
     );
-    const exportArtifacts = buildPipelineExportArtifacts(pipelineSnapshot);
-    const exportedAt = exportArtifacts.exportedAt;
+    const exportedAt = new Date().toISOString();
+    const timestamp = Date.now();
     const goalProfile = goalProfileRow ? toGoalProfile(goalProfileRow) : null;
     const riskFlags = extractRiskFlagsFromCoachRequest({
       generated_at: exportedAt,
       goal_profile: goalProfile ?? undefined,
       daily_check_in: pipelineSnapshot.todayCheckIn ?? undefined,
+    });
+    const exportArtifacts = buildPipelineExportArtifacts(pipelineSnapshot, {
+      exportedAt,
+      timestamp,
+      llmBundle: {
+        goalProfile,
+        riskFlags,
+      },
     });
 
     const payload = {
@@ -3420,10 +3429,18 @@ export async function exportPipelineArtifacts(): Promise<PipelineExportResult> {
 
     const jsonFileUri = `${directory}${exportArtifacts.jsonFileName}`;
     const healthCheckFileUri = `${directory}${exportArtifacts.healthCheckFileName}`;
+    const llmBundleFileUri = `${directory}${exportArtifacts.llmBundleFileName}`;
     await Promise.all([
       FileSystem.writeAsStringAsync(jsonFileUri, safeJsonStringify(payload), {
         encoding: FileSystem.EncodingType.UTF8,
       }),
+      FileSystem.writeAsStringAsync(
+        llmBundleFileUri,
+        exportArtifacts.llmBundleJson,
+        {
+          encoding: FileSystem.EncodingType.UTF8,
+        },
+      ),
       FileSystem.writeAsStringAsync(
         healthCheckFileUri,
         exportArtifacts.healthCheckMarkdown,
@@ -3442,9 +3459,13 @@ export async function exportPipelineArtifacts(): Promise<PipelineExportResult> {
         mimeType: "text/markdown",
         dialogTitle: "Export BioStream health_check.md",
       });
+      await Sharing.shareAsync(llmBundleFileUri, {
+        mimeType: "application/json",
+        dialogTitle: "Export BioStream llm_bundle.json",
+      });
     }
 
-    return { jsonFileUri, healthCheckFileUri };
+    return { jsonFileUri, healthCheckFileUri, llmBundleFileUri };
   });
 }
 
