@@ -16,6 +16,7 @@ const baseProps = {
   lastSync: null as LastSync,
   onChangeCoachDraft: jest.fn(),
   onOpenWorkout: jest.fn(),
+  onSaveDailyCheckIn: jest.fn(),
   onSendCoachMessage: jest.fn(),
   onSync: jest.fn(),
   snapshot: emptySnapshot,

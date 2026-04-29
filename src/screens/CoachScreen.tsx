@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -11,12 +11,22 @@ import {
 } from "react-native";
 import {
   Activity,
+  AlertTriangle,
   ArrowRight,
+  Check,
   MoreHorizontal,
   RefreshCw,
 } from "lucide-react-native";
 
 import type { ReadinessStatusValue } from "../coach/readinessStatus";
+import {
+  createDefaultDailyCheckIn,
+  dailyCheckInPainOptions,
+  dailyCheckInPreferredActivityOptions,
+  dailyCheckInScaleOptions,
+  dailyCheckInTimeOptions,
+  painRiskFlagFor,
+} from "../coach/dailyCheckIn";
 import {
   dataAge,
   formatDateKey,
@@ -25,8 +35,16 @@ import {
   toneColor,
 } from "../core/formatters";
 import type { CoachConversationMessage, LastSync } from "../core/types";
-import type { PipelineSnapshot } from "../health/types";
-import { formatDuration as formatDurationFromDates } from "../lib/dates";
+import type {
+  DailyCheckIn,
+  DailyCheckInPain,
+  DailyCheckInPreferredActivity,
+  PipelineSnapshot,
+} from "../health/types";
+import {
+  formatDuration as formatDurationFromDates,
+  localDateKey,
+} from "../lib/dates";
 import { styles } from "../styles/appStyles";
 import { tokens } from "../theme/tokens";
 import {
@@ -108,6 +126,87 @@ function ReadinessStatusIndicator({
   );
 }
 
+function scaleLabel(value: number): string {
+  if (value === 1) return "Low";
+  if (value === 2) return "Fair";
+  if (value === 3) return "OK";
+  if (value === 4) return "Good";
+  return "High";
+}
+
+function painLabel(value: DailyCheckInPain): string {
+  return value === "none"
+    ? "None"
+    : value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function activityLabel(value: DailyCheckInPreferredActivity): string {
+  switch (value) {
+    case "easy_cardio":
+      return "Easy";
+    case "run":
+      return "Run";
+    case "ride":
+      return "Ride";
+    case "strength":
+      return "Lift";
+    case "mobility":
+      return "Mobility";
+    case "rest":
+      return "Rest";
+  }
+}
+
+function CheckInSegment<T extends string | number>({
+  label,
+  value,
+  options,
+  format,
+  risk,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: readonly T[];
+  format: (value: T) => string;
+  risk?: boolean;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <View style={styles.checkInGroup}>
+      <Text style={styles.checkInLabel}>{label}</Text>
+      <View style={styles.segmentRow}>
+        {options.map((option) => {
+          const selected = option === value;
+          return (
+            <Pressable
+              accessibilityRole="button"
+              key={String(option)}
+              onPress={() => onChange(option)}
+              style={({ pressed }) => [
+                styles.segmentButton,
+                selected && styles.segmentButtonSelected,
+                selected && risk && styles.segmentButtonRisk,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.segmentButtonText,
+                  selected && styles.segmentButtonTextSelected,
+                  selected && risk && styles.segmentButtonRiskText,
+                ]}
+              >
+                {format(option)}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 export function CoachScreen({
   athleteName,
   coachBusy,
@@ -122,6 +221,7 @@ export function CoachScreen({
   warnings,
   onChangeCoachDraft,
   onSendCoachMessage,
+  onSaveDailyCheckIn,
   onSync,
   onOpenWorkout,
 }: {
@@ -138,10 +238,17 @@ export function CoachScreen({
   warnings: string[];
   onChangeCoachDraft: (value: string) => void;
   onSendCoachMessage: (message?: string) => void;
+  onSaveDailyCheckIn: (draft: Partial<DailyCheckIn>) => void | Promise<void>;
   onSync: () => void;
   onOpenWorkout: () => void;
 }) {
   const current = snapshot.today;
+  const checkInDate = localDateKey(new Date());
+  const [checkInDraft, setCheckInDraft] = useState<DailyCheckIn>(() =>
+    snapshot.todayCheckIn
+      ? snapshot.todayCheckIn
+      : createDefaultDailyCheckIn(checkInDate),
+  );
   const recommendation = snapshot.recommendation;
   const readinessStatus = recommendation.readinessStatus;
   const accent = toneColor(recommendation.color);
@@ -203,6 +310,27 @@ export function CoachScreen({
     ? `You are in a good spot to keep building toward ${goalPhrase}. I have checked the recovery picture and lined up today's work. If anything has changed since the data came in, tell me and I will adjust it.`
     : `Let's keep building toward ${goalPhrase}. I do not have enough wearable history yet, so I will keep things sensible and adjust as you give me more context.`;
   const feedRef = useRef<ScrollView | null>(null);
+  const painRisk = painRiskFlagFor(checkInDraft);
+
+  useEffect(() => {
+    setCheckInDraft(
+      snapshot.todayCheckIn
+        ? snapshot.todayCheckIn
+        : createDefaultDailyCheckIn(checkInDate),
+    );
+  }, [checkInDate, snapshot.todayCheckIn]);
+
+  function updateCheckInDraft(patch: Partial<DailyCheckIn>) {
+    setCheckInDraft((currentDraft) => {
+      const next = {
+        ...currentDraft,
+        ...patch,
+        localDate: checkInDate,
+      };
+      void onSaveDailyCheckIn(next);
+      return next;
+    });
+  }
 
   function scrollFeedToEnd(animated = true) {
     requestAnimationFrame(() => {
@@ -336,6 +464,107 @@ export function CoachScreen({
                 </Text>
               ))
             : null}
+        </DataCard>
+
+        <DataCard
+          accent={painRisk ? tokens.danger : tokens.brass}
+          label="Daily check-in"
+        >
+          <View style={styles.sourceLine}>
+            <Text style={styles.sourceLineText}>User-reported context</Text>
+            <Text
+              style={[
+                styles.sourceLineText,
+                painRisk && styles.checkInRiskText,
+              ]}
+            >
+              {painRisk ?? "No pain flagged"}
+            </Text>
+          </View>
+          <View style={styles.checkInGrid}>
+            <CheckInSegment
+              format={scaleLabel}
+              label="Sleep quality"
+              onChange={(sleepQuality) => updateCheckInDraft({ sleepQuality })}
+              options={dailyCheckInScaleOptions}
+              value={checkInDraft.sleepQuality}
+            />
+            <CheckInSegment
+              format={scaleLabel}
+              label="Soreness"
+              onChange={(soreness) => updateCheckInDraft({ soreness })}
+              options={dailyCheckInScaleOptions}
+              value={checkInDraft.soreness}
+            />
+            <CheckInSegment
+              format={scaleLabel}
+              label="Energy"
+              onChange={(energy) => updateCheckInDraft({ energy })}
+              options={dailyCheckInScaleOptions}
+              value={checkInDraft.energy}
+            />
+            <CheckInSegment
+              format={painLabel}
+              label="Pain"
+              onChange={(pain) => updateCheckInDraft({ pain })}
+              options={dailyCheckInPainOptions}
+              risk={checkInDraft.pain !== "none"}
+              value={checkInDraft.pain}
+            />
+            <CheckInSegment
+              format={(minutes) => `${minutes}m`}
+              label="Available time"
+              onChange={(availableTimeMinutes) =>
+                updateCheckInDraft({ availableTimeMinutes })
+              }
+              options={dailyCheckInTimeOptions}
+              value={checkInDraft.availableTimeMinutes}
+            />
+            <CheckInSegment
+              format={activityLabel}
+              label="Preferred activity"
+              onChange={(preferredActivity) =>
+                updateCheckInDraft({ preferredActivity })
+              }
+              options={dailyCheckInPreferredActivityOptions}
+              value={checkInDraft.preferredActivity}
+            />
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() =>
+              updateCheckInDraft({
+                completedYesterday: !checkInDraft.completedYesterday,
+              })
+            }
+            style={({ pressed }) => [
+              styles.checkInToggle,
+              checkInDraft.completedYesterday && styles.checkInToggleSelected,
+              pressed && styles.pressed,
+            ]}
+          >
+            <View
+              style={[
+                styles.checkInToggleIcon,
+                checkInDraft.completedYesterday &&
+                  styles.checkInToggleIconSelected,
+              ]}
+            >
+              {checkInDraft.completedYesterday ? (
+                <Check color={tokens.surface} size={14} strokeWidth={3} />
+              ) : null}
+            </View>
+            <Text style={styles.checkInToggleText}>
+              Completed yesterday's session
+            </Text>
+            {painRisk ? (
+              <AlertTriangle
+                color={tokens.danger}
+                size={17}
+                strokeWidth={2.2}
+              />
+            ) : null}
+          </Pressable>
         </DataCard>
 
         <Pressable accessibilityRole="button" onPress={onOpenWorkout}>

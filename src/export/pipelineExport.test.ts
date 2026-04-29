@@ -17,6 +17,8 @@ function snapshot(): PipelineSnapshot {
     latestDiagnostics: [],
     today: null,
     history: [],
+    todayCheckIn: null,
+    checkInHistory: [],
     recentWorkouts: [],
     recentSamples: [],
     trainingLoad: buildTrainingLoadSnapshot(),

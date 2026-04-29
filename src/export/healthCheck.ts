@@ -70,9 +70,13 @@ function partialLine(source: SourceFreshness): string {
 }
 
 function missingCheckIns(sourceFreshness: SourceFreshness[]): boolean {
-  return sourceFreshness.some(
-    (source) => source.domain === "check_ins" && source.state === "missing",
+  const checkIns = sourceFreshness.filter(
+    (source) => source.domain === "check_ins",
   );
+
+  return checkIns.length
+    ? checkIns.every((source) => source.state === "missing")
+    : false;
 }
 
 function hasLocalHealthData(snapshot: PipelineSnapshot): boolean {

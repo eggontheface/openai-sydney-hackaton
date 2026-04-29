@@ -3,6 +3,11 @@ import * as Sharing from "expo-sharing";
 import * as SQLite from "expo-sqlite";
 
 import { completeCoachRecommendation } from "../coach/dailyRecommendation";
+import {
+  buildDailyCheckInContextSignals,
+  normalizeDailyCheckIn,
+  painRiskFlagFor,
+} from "../coach/dailyCheckIn";
 import { extractRiskFlagsFromCoachRequest } from "../coach/riskFlags";
 import { buildReadinessStatus } from "../coach/readinessStatus";
 import {
@@ -33,6 +38,9 @@ import {
 import type {
   CanonicalType,
   CoachRecommendation,
+  DailyCheckIn,
+  DailyCheckInPain,
+  DailyCheckInPreferredActivity,
   DailyMetrics,
   HealthConnectReadDiagnostic,
   HealthProvider,
@@ -300,6 +308,20 @@ type DailyMetricsRow = {
   generated_at: string;
 };
 
+type DailyCheckInRow = {
+  local_date: string;
+  sleep_quality: number;
+  soreness: number;
+  energy: number;
+  pain: DailyCheckInPain;
+  available_time_minutes: number;
+  preferred_activity: DailyCheckInPreferredActivity;
+  completed_yesterday: number;
+  source: "user_reported";
+  created_at: string;
+  updated_at: string;
+};
+
 const nutritionDailyAddedColumns: Record<string, string> = {
   saturated_fat_g: "REAL",
   monounsaturated_fat_g: "REAL",
@@ -503,15 +525,6 @@ const sourceFreshnessConfigs: SourceFreshnessConfig[] = [
     partialWhenMissingTypes: true,
     missingLimitation:
       "No imported weight, body fat, or lean mass samples are available.",
-  },
-  {
-    domain: "check_ins",
-    label: "Check-ins",
-    canonicalTypes: [],
-    maxFreshAgeDays: 0,
-    source: "check_ins",
-    missingLimitation:
-      "Daily check-ins are not implemented in local storage yet.",
   },
 ];
 
@@ -1191,6 +1204,36 @@ async function getSourceFreshness(
     });
   }
 
+  const checkInStats = await db.getFirstAsync<FreshnessStatsRow>(`
+    SELECT
+      COUNT(*) AS sample_count,
+      COUNT(DISTINCT local_date) AS day_count,
+      MAX(local_date) AS latest_date,
+      MAX(updated_at) AS last_updated_at
+    FROM daily_check_ins
+  `);
+  const checkInCount = Number(checkInStats?.sample_count ?? 0);
+  const checkInLatestDate = checkInStats?.latest_date ?? undefined;
+  const checkInAgeDays = daysSinceLocalDate(checkInLatestDate, today);
+  rows.push({
+    domain: "check_ins",
+    label: "Daily check-ins",
+    state: checkInCount
+      ? checkInLatestDate === today
+        ? "fresh"
+        : "stale"
+      : "missing",
+    canonicalTypes: [],
+    sampleCount: checkInCount,
+    dayCount: Number(checkInStats?.day_count ?? 0),
+    latestLocalDate: checkInLatestDate,
+    lastUpdatedAt: checkInStats?.last_updated_at ?? undefined,
+    ageDays: checkInAgeDays,
+    limitations: [
+      "User-reported context, separate from imported wearable data.",
+    ],
+  });
+
   return rows;
 }
 
@@ -1261,6 +1304,39 @@ function toDailyMetrics(row: DailyMetricsRow): DailyMetrics {
     vo2max: optionalNumber(row.vo2max),
     generatedAt: row.generated_at,
   };
+}
+
+function toDailyCheckIn(row: DailyCheckInRow): DailyCheckIn {
+  return {
+    localDate: row.local_date,
+    sleepQuality: Number(row.sleep_quality),
+    soreness: Number(row.soreness),
+    energy: Number(row.energy),
+    pain: row.pain,
+    availableTimeMinutes: Number(row.available_time_minutes),
+    preferredActivity: row.preferred_activity,
+    completedYesterday: bool(row.completed_yesterday),
+    source: "user_reported",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function getDailyCheckInsFromDb(
+  db: SQLite.SQLiteDatabase,
+  limit = 30,
+): Promise<DailyCheckIn[]> {
+  const rows = await db.getAllAsync<DailyCheckInRow>(
+    `
+      SELECT *
+      FROM daily_check_ins
+      ORDER BY local_date DESC
+      LIMIT ?
+    `,
+    limit,
+  );
+
+  return rows.map(toDailyCheckIn);
 }
 
 function toGoalProfile(row: GoalProfileRow): GoalProfile {
@@ -1628,6 +1704,20 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       confidence REAL NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS daily_check_ins (
+      local_date TEXT PRIMARY KEY NOT NULL,
+      sleep_quality INTEGER NOT NULL,
+      soreness INTEGER NOT NULL,
+      energy INTEGER NOT NULL,
+      pain TEXT NOT NULL,
+      available_time_minutes INTEGER NOT NULL,
+      preferred_activity TEXT NOT NULL,
+      completed_yesterday INTEGER NOT NULL,
+      source TEXT NOT NULL DEFAULT 'user_reported',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   await addMissingColumns(db, "nutrition_daily", nutritionDailyAddedColumns);
@@ -1782,6 +1872,51 @@ export async function clearGoalProfile(): Promise<void> {
   await withStorageLock(async () => {
     const db = await getDb();
     await db.runAsync("DELETE FROM goal_profile WHERE id = 'current'");
+  });
+}
+
+export async function saveDailyCheckIn(
+  draft: Partial<DailyCheckIn>,
+): Promise<DailyCheckIn> {
+  return withStorageLock(async () => {
+    const db = await getDb();
+    const localDate = draft.localDate ?? localDateKey(new Date());
+    const current = await db.getFirstAsync<DailyCheckInRow>(
+      "SELECT * FROM daily_check_ins WHERE local_date = ? LIMIT 1",
+      localDate,
+    );
+    const next = normalizeDailyCheckIn(
+      {
+        ...(current ? toDailyCheckIn(current) : {}),
+        ...draft,
+      },
+      localDate,
+      new Date().toISOString(),
+    );
+
+    await db.runAsync(
+      `
+        INSERT OR REPLACE INTO daily_check_ins (
+          local_date, sleep_quality, soreness, energy, pain,
+          available_time_minutes, preferred_activity, completed_yesterday,
+          source, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      next.localDate,
+      next.sleepQuality,
+      next.soreness,
+      next.energy,
+      next.pain,
+      next.availableTimeMinutes,
+      next.preferredActivity,
+      next.completedYesterday ? 1 : 0,
+      next.source,
+      next.createdAt,
+      next.updatedAt,
+    );
+
+    return next;
   });
 }
 
@@ -2572,26 +2707,36 @@ function deriveRecommendation(
   history: DailyMetrics[],
   sourceFreshness: SourceFreshness[] = [],
   trainingLoad: TrainingLoadSnapshot = buildCurrentTrainingLoadSnapshot(),
+  todayCheckIn: DailyCheckIn | null = null,
 ): CoachRecommendation {
   if (!current || current.sourceCount === 0) {
+    const checkInSignals = buildDailyCheckInContextSignals(todayCheckIn);
+    const painRisk = painRiskFlagFor(todayCheckIn);
     const readinessStatus = buildReadinessStatus({
       score: null,
-      signalsUsed: [],
+      signalsUsed: checkInSignals,
       sourceFreshness,
     });
 
-    return completeCoachRecommendation({
-      readiness: null,
-      readinessStatus,
-      readinessLabel: readinessStatus.ui.label,
-      color: readinessStatus.ui.color,
-      title: readinessStatus.ui.title,
-      detail: readinessStatus.ui.detail,
-      reason: readinessStatus.ui.reason,
-      opener: readinessStatus.ui.opener,
-      strain: 0,
-      strainTarget: "—",
-    });
+    return completeCoachRecommendation(
+      {
+        readiness: null,
+        readinessStatus,
+        readinessLabel: painRisk ? "Pain flag" : readinessStatus.ui.label,
+        color: painRisk ? "warm" : readinessStatus.ui.color,
+        title: painRisk ? "Protect the pain signal" : readinessStatus.ui.title,
+        detail: painRisk
+          ? "Easy movement only until pain is clearer."
+          : readinessStatus.ui.detail,
+        reason: checkInSignals.length
+          ? `${checkInSignals.join(", ")}. Wearable readiness is unavailable, so user-reported context is driving a conservative call.`
+          : readinessStatus.ui.reason,
+        opener: readinessStatus.ui.opener,
+        strain: painRisk ? 2 : 0,
+        strainTarget: painRisk ? "0-3" : "—",
+      },
+      { readinessSignals: checkInSignals },
+    );
   }
 
   const baselineRows = history
@@ -2614,6 +2759,8 @@ function deriveRecommendation(
   let readiness = 56;
   const readinessSignals: string[] = [];
   const contextSignals: string[] = [];
+  const checkInSignals = buildDailyCheckInContextSignals(todayCheckIn);
+  const painRisk = painRiskFlagFor(todayCheckIn);
   const freshnessGaps = recommendationFreshnessGaps(sourceFreshness);
   const trainingLoadBoundary =
     recommendationBoundaryForTrainingLoad(trainingLoad);
@@ -2697,6 +2844,18 @@ function deriveRecommendation(
     contextSignals.push(trainingLoadBoundary.recommendationNote);
   }
 
+  if (todayCheckIn) {
+    readinessSignals.push(...checkInSignals);
+    contextSignals.push("user-reported daily check-in supplied");
+    if (todayCheckIn.sleepQuality <= 2) readiness -= 8;
+    if (todayCheckIn.energy <= 2) readiness -= 10;
+    if (todayCheckIn.soreness >= 4) readiness -= 8;
+    if (todayCheckIn.completedYesterday) readiness -= 2;
+    if (todayCheckIn.availableTimeMinutes <= 20) readiness -= 4;
+    if (todayCheckIn.preferredActivity === "rest") readiness -= 12;
+    if (painRisk) readiness -= todayCheckIn.pain === "severe" ? 30 : 18;
+  }
+
   readiness = Math.max(20, Math.min(96, Math.round(readiness)));
 
   if (!readinessSignals.length && !contextSignals.length) {
@@ -2710,11 +2869,39 @@ function deriveRecommendation(
     signalsUsed: readinessSignals,
     sourceFreshness,
   });
+  if (painRisk && !readinessSignals.includes(painRisk)) {
+    readinessSignals.push(painRisk);
+  }
+  const painReadinessStatus = painRisk
+    ? buildReadinessStatus({
+        score: Math.min(readinessStatus.score ?? 44, 44),
+        signalsUsed: readinessSignals,
+        sourceFreshness,
+      })
+    : readinessStatus;
   const coachSignals = readinessSignals.length
     ? [...readinessSignals, ...contextSignals]
     : contextSignals.length
       ? contextSignals
       : [readinessStatus.ui.reason];
+
+  if (painRisk) {
+    return completeCoachRecommendation(
+      {
+        readiness: painReadinessStatus.score,
+        readinessStatus: painReadinessStatus,
+        readinessLabel: "Pain flag",
+        color: "warm",
+        title: "Pain-aware easy day",
+        detail: `${Math.min(todayCheckIn?.availableTimeMinutes ?? 20, 30)} min walk, mobility, or rest`,
+        reason: `${coachSignals.join(", ")}. Pain is user-reported risk context, so impact and intensity are off the table today.`,
+        opener: `Pain changes the call. ${coachSignals.join(", ")}. Keep this easy and stop if symptoms increase.`,
+        strain: 2.5,
+        strainTarget: "0-4",
+      },
+      { readinessSignals, contextSignals },
+    );
+  }
 
   if (readinessStatus.status === "unknown") {
     return completeCoachRecommendation(
@@ -2841,6 +3028,9 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
     const recentWorkouts = await getRecentWorkoutsFromDb(db, 5);
     const recentSamples = await getRecentSamplesFromDb(db, 12);
     const trainingLoad = buildCurrentTrainingLoadSnapshot(dedupedWorkoutCount);
+    const checkInHistory = await getDailyCheckInsFromDb(db, 30);
+    const todayCheckIn =
+      checkInHistory.find((row) => row.localDate === todayKey) ?? null;
 
     return {
       totalSamples: Number(countRow?.total ?? 0),
@@ -2861,6 +3051,8 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
       })),
       today,
       history,
+      todayCheckIn,
+      checkInHistory,
       recentWorkouts: recentWorkouts.map((row) => ({
         workoutId: row.workout_id,
         platform: row.platform,
@@ -2906,6 +3098,7 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
         history,
         sourceFreshness,
         trainingLoad,
+        todayCheckIn,
       ),
     };
   });
@@ -3181,6 +3374,7 @@ export async function exportPipelineArtifacts(): Promise<PipelineExportResult> {
     const dailyMetrics = await db.getAllAsync<DailyMetricsRow>(
       "SELECT * FROM daily_metrics ORDER BY date ASC",
     );
+    const checkInHistory = await getDailyCheckInsFromDb(db, 365);
     const syncRuns = await db.getAllAsync<SyncRunRow>(
       "SELECT * FROM sync_runs ORDER BY started_at ASC",
     );
@@ -3197,6 +3391,7 @@ export async function exportPipelineArtifacts(): Promise<PipelineExportResult> {
     const riskFlags = extractRiskFlagsFromCoachRequest({
       generated_at: exportedAt,
       goal_profile: goalProfile ?? undefined,
+      daily_check_in: pipelineSnapshot.todayCheckIn ?? undefined,
     });
 
     const payload = {
@@ -3207,6 +3402,7 @@ export async function exportPipelineArtifacts(): Promise<PipelineExportResult> {
       workouts,
       nutritionDaily,
       dailyMetrics,
+      checkInHistory,
       sourceFreshness,
       syncRuns,
       diagnostics,
