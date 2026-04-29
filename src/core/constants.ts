@@ -16,7 +16,7 @@ import type { AppSettings } from "../storage/appSettings";
 import type { AnalyticsMetricConfig } from "./types";
 
 export const ranges = [7, 30, 365];
-export const baselineRangeDays = 365;
+export const baselineRangeDays = 30;
 
 export const emptyAppSettings: AppSettings = {
   athleteName: null,

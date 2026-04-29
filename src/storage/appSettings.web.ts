@@ -16,8 +16,9 @@ type StoredAppSettings = {
 
 const openAiApiKeyStorageKey = "biostream.openai_api_key";
 const appSettingsStorageKey = "biostream.local_settings";
+const fallbackDefaultSyncRangeDays = 30;
 const fallbackSettings: StoredAppSettings = {
-  defaultSyncRangeDays: 365,
+  defaultSyncRangeDays: fallbackDefaultSyncRangeDays,
 };
 const allowedSyncRanges = new Set([7, 30, 365]);
 
@@ -80,7 +81,8 @@ export async function loadAppSettings(): Promise<AppSettings> {
     athleteName: settings.athleteName ?? null,
     hasOpenAiApiKey: Boolean(activeApiKey.apiKey),
     openAiApiKeySource: activeApiKey.source,
-    defaultSyncRangeDays: settings.defaultSyncRangeDays ?? 365,
+    defaultSyncRangeDays:
+      settings.defaultSyncRangeDays ?? fallbackDefaultSyncRangeDays,
   };
 }
 

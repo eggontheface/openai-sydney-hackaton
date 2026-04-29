@@ -8,17 +8,18 @@ import {
   requestPermission,
   SdkAvailabilityStatus,
   SleepStageType,
-} from 'react-native-health-connect';
+} from "react-native-health-connect";
 import type {
   AggregateResultRecordType,
   Permission,
   ReadHealthDataHistoryPermission,
   RecordResult,
   RecordType,
-} from 'react-native-health-connect';
+} from "react-native-health-connect";
 
-import { localDateKey, secondsBetween } from '../lib/dates';
-import { safeJsonStringify } from '../lib/json';
+import { localDateKey, secondsBetween } from "../lib/dates";
+import { safeJsonStringify } from "../lib/json";
+import { splitSyncRangeByDays } from "./ranges";
 import type {
   CanonicalType,
   HealthConnectReadDiagnostic,
@@ -30,49 +31,55 @@ import type {
   SyncRange,
   SyncResult,
   WorkoutRecord,
-} from './types';
+} from "./types";
 
 type HealthConnectRecordConfig = {
   recordType: RecordType;
   canonicalType: CanonicalType;
 };
 
-type HealthConnectPermissionRequest = Permission | ReadHealthDataHistoryPermission;
+type HealthConnectPermissionRequest =
+  | Permission
+  | ReadHealthDataHistoryPermission;
 
 const aggregateConfigs: HealthConnectRecordConfig[] = [
-  { recordType: 'Steps', canonicalType: 'steps' },
-  { recordType: 'ActiveCaloriesBurned', canonicalType: 'active_energy' },
-  { recordType: 'TotalCaloriesBurned', canonicalType: 'total_energy' },
-  { recordType: 'Distance', canonicalType: 'distance' },
-  { recordType: 'HeartRate', canonicalType: 'heart_rate' },
-  { recordType: 'RestingHeartRate', canonicalType: 'resting_heart_rate' },
-  { recordType: 'SleepSession', canonicalType: 'sleep_session' },
+  { recordType: "Steps", canonicalType: "steps" },
+  { recordType: "ActiveCaloriesBurned", canonicalType: "active_energy" },
+  { recordType: "TotalCaloriesBurned", canonicalType: "total_energy" },
+  { recordType: "Distance", canonicalType: "distance" },
+  { recordType: "HeartRate", canonicalType: "heart_rate" },
+  { recordType: "RestingHeartRate", canonicalType: "resting_heart_rate" },
+  { recordType: "SleepSession", canonicalType: "sleep_session" },
 ];
 
 const rawRecordConfigs: HealthConnectRecordConfig[] = [
-  { recordType: 'ExerciseSession', canonicalType: 'workout' },
-  { recordType: 'SleepSession', canonicalType: 'sleep_session' },
-  { recordType: 'HeartRateVariabilityRmssd', canonicalType: 'hrv_rmssd' },
-  { recordType: 'Weight', canonicalType: 'weight' },
-  { recordType: 'BodyFat', canonicalType: 'body_fat' },
-  { recordType: 'LeanBodyMass', canonicalType: 'lean_body_mass' },
-  { recordType: 'Nutrition', canonicalType: 'nutrition' },
-  { recordType: 'Hydration', canonicalType: 'hydration' },
-  { recordType: 'Vo2Max', canonicalType: 'vo2max' },
+  { recordType: "ExerciseSession", canonicalType: "workout" },
+  { recordType: "SleepSession", canonicalType: "sleep_session" },
+  { recordType: "HeartRateVariabilityRmssd", canonicalType: "hrv_rmssd" },
+  { recordType: "Weight", canonicalType: "weight" },
+  { recordType: "BodyFat", canonicalType: "body_fat" },
+  { recordType: "LeanBodyMass", canonicalType: "lean_body_mass" },
+  { recordType: "Nutrition", canonicalType: "nutrition" },
+  { recordType: "Hydration", canonicalType: "hydration" },
+  { recordType: "Vo2Max", canonicalType: "vo2max" },
 ];
 
 const permissionRecordTypes = Array.from(
-  new Set([...aggregateConfigs, ...rawRecordConfigs].map((config) => config.recordType)),
+  new Set(
+    [...aggregateConfigs, ...rawRecordConfigs].map(
+      (config) => config.recordType,
+    ),
+  ),
 );
 
 const permissions: Permission[] = permissionRecordTypes.map((recordType) => ({
-  accessType: 'read',
+  accessType: "read",
   recordType,
 }));
 
 const healthDataHistoryPermission: ReadHealthDataHistoryPermission = {
-  accessType: 'read',
-  recordType: 'ReadHealthDataHistory',
+  accessType: "read",
+  recordType: "ReadHealthDataHistory",
 };
 
 function needsHistoryPermission(range: SyncRange): boolean {
@@ -80,13 +87,23 @@ function needsHistoryPermission(range: SyncRange): boolean {
   return range.startDate.getTime() < thirtyDaysAgo;
 }
 
-function permissionsForRange(range: SyncRange): HealthConnectPermissionRequest[] {
-  return needsHistoryPermission(range) ? [...permissions, healthDataHistoryPermission] : permissions;
+function permissionsForRange(
+  range: SyncRange,
+): HealthConnectPermissionRequest[] {
+  return needsHistoryPermission(range)
+    ? [...permissions, healthDataHistoryPermission]
+    : permissions;
 }
 
 const readTimeoutMs = 12000;
 const maxPagesPerType = 4;
 const pageSize = 1000;
+const aggregateChunkDays = 30;
+const chunkedAggregateRecordTypes = new Set<AggregateResultRecordType>([
+  "Distance",
+  "HeartRate",
+  "TotalCaloriesBurned",
+]);
 
 type RecordMetadata = {
   id?: string;
@@ -99,9 +116,11 @@ type RecordMetadata = {
   };
 };
 
-function hrvMethodForCanonicalType(canonicalType: CanonicalType): HrvMethod | undefined {
-  if (canonicalType === 'hrv_rmssd') return 'rmssd';
-  if (canonicalType === 'hrv_sdnn') return 'sdnn';
+function hrvMethodForCanonicalType(
+  canonicalType: CanonicalType,
+): HrvMethod | undefined {
+  if (canonicalType === "hrv_rmssd") return "rmssd";
+  if (canonicalType === "hrv_sdnn") return "sdnn";
   return undefined;
 }
 
@@ -114,7 +133,7 @@ function healthConnectMetadataJson(
   }
 
   return safeJsonStringify({
-    ...(typeof record === 'object' && record !== null && !Array.isArray(record)
+    ...(typeof record === "object" && record !== null && !Array.isArray(record)
       ? record
       : { raw: record }),
     healthConnect: extra,
@@ -130,7 +149,7 @@ type TimedRecord = {
 
 type NutritionAccumulator = Omit<
   NutritionDailyRecord,
-  'entryCount' | 'allNutrientsJson'
+  "entryCount" | "allNutrientsJson"
 > & {
   entryCount: number;
   records: unknown[];
@@ -138,34 +157,34 @@ type NutritionAccumulator = Omit<
 };
 
 type NutritionNumberField =
-  | 'kcalIn'
-  | 'proteinG'
-  | 'carbsG'
-  | 'fatG'
-  | 'saturatedFatG'
-  | 'monounsaturatedFatG'
-  | 'polyunsaturatedFatG'
-  | 'transFatG'
-  | 'fiberG'
-  | 'sugarG'
-  | 'cholesterolMg'
-  | 'waterMl'
-  | 'caffeineMg'
-  | 'sodiumMg'
-  | 'potassiumMg'
-  | 'calciumMg'
-  | 'ironMg'
-  | 'magnesiumMg'
-  | 'zincMg'
-  | 'vitaminAMcg'
-  | 'vitaminB6Mg'
-  | 'vitaminB12Mcg'
-  | 'vitaminCMg'
-  | 'vitaminDMcg'
-  | 'vitaminEMg'
-  | 'vitaminKMcg';
+  | "kcalIn"
+  | "proteinG"
+  | "carbsG"
+  | "fatG"
+  | "saturatedFatG"
+  | "monounsaturatedFatG"
+  | "polyunsaturatedFatG"
+  | "transFatG"
+  | "fiberG"
+  | "sugarG"
+  | "cholesterolMg"
+  | "waterMl"
+  | "caffeineMg"
+  | "sodiumMg"
+  | "potassiumMg"
+  | "calciumMg"
+  | "ironMg"
+  | "magnesiumMg"
+  | "zincMg"
+  | "vitaminAMcg"
+  | "vitaminB6Mg"
+  | "vitaminB12Mcg"
+  | "vitaminCMg"
+  | "vitaminDMcg"
+  | "vitaminEMg"
+  | "vitaminKMcg";
 
-type NutritionUnit = 'kcal' | 'g' | 'mg' | 'mcg' | 'number';
+type NutritionUnit = "kcal" | "g" | "mg" | "mcg" | "number";
 
 type NutritionFieldConfig = {
   recordField: string;
@@ -174,50 +193,58 @@ type NutritionFieldConfig = {
 };
 
 const supportedNutritionFields: NutritionFieldConfig[] = [
-  { recordField: 'energy', unit: 'kcal', dailyField: 'kcalIn' },
-  { recordField: 'protein', unit: 'g', dailyField: 'proteinG' },
-  { recordField: 'totalCarbohydrate', unit: 'g', dailyField: 'carbsG' },
-  { recordField: 'totalFat', unit: 'g', dailyField: 'fatG' },
-  { recordField: 'saturatedFat', unit: 'g', dailyField: 'saturatedFatG' },
-  { recordField: 'monounsaturatedFat', unit: 'g', dailyField: 'monounsaturatedFatG' },
-  { recordField: 'polyunsaturatedFat', unit: 'g', dailyField: 'polyunsaturatedFatG' },
-  { recordField: 'transFat', unit: 'g', dailyField: 'transFatG' },
-  { recordField: 'dietaryFiber', unit: 'g', dailyField: 'fiberG' },
-  { recordField: 'sugar', unit: 'g', dailyField: 'sugarG' },
-  { recordField: 'cholesterol', unit: 'mg', dailyField: 'cholesterolMg' },
-  { recordField: 'caffeine', unit: 'mg', dailyField: 'caffeineMg' },
-  { recordField: 'sodium', unit: 'mg', dailyField: 'sodiumMg' },
-  { recordField: 'potassium', unit: 'mg', dailyField: 'potassiumMg' },
-  { recordField: 'calcium', unit: 'mg', dailyField: 'calciumMg' },
-  { recordField: 'iron', unit: 'mg', dailyField: 'ironMg' },
-  { recordField: 'magnesium', unit: 'mg', dailyField: 'magnesiumMg' },
-  { recordField: 'zinc', unit: 'mg', dailyField: 'zincMg' },
-  { recordField: 'vitaminA', unit: 'mcg', dailyField: 'vitaminAMcg' },
-  { recordField: 'vitaminB6', unit: 'mg', dailyField: 'vitaminB6Mg' },
-  { recordField: 'vitaminB12', unit: 'mcg', dailyField: 'vitaminB12Mcg' },
-  { recordField: 'vitaminC', unit: 'mg', dailyField: 'vitaminCMg' },
-  { recordField: 'vitaminD', unit: 'mcg', dailyField: 'vitaminDMcg' },
-  { recordField: 'vitaminE', unit: 'mg', dailyField: 'vitaminEMg' },
-  { recordField: 'vitaminK', unit: 'mcg', dailyField: 'vitaminKMcg' },
+  { recordField: "energy", unit: "kcal", dailyField: "kcalIn" },
+  { recordField: "protein", unit: "g", dailyField: "proteinG" },
+  { recordField: "totalCarbohydrate", unit: "g", dailyField: "carbsG" },
+  { recordField: "totalFat", unit: "g", dailyField: "fatG" },
+  { recordField: "saturatedFat", unit: "g", dailyField: "saturatedFatG" },
+  {
+    recordField: "monounsaturatedFat",
+    unit: "g",
+    dailyField: "monounsaturatedFatG",
+  },
+  {
+    recordField: "polyunsaturatedFat",
+    unit: "g",
+    dailyField: "polyunsaturatedFatG",
+  },
+  { recordField: "transFat", unit: "g", dailyField: "transFatG" },
+  { recordField: "dietaryFiber", unit: "g", dailyField: "fiberG" },
+  { recordField: "sugar", unit: "g", dailyField: "sugarG" },
+  { recordField: "cholesterol", unit: "mg", dailyField: "cholesterolMg" },
+  { recordField: "caffeine", unit: "mg", dailyField: "caffeineMg" },
+  { recordField: "sodium", unit: "mg", dailyField: "sodiumMg" },
+  { recordField: "potassium", unit: "mg", dailyField: "potassiumMg" },
+  { recordField: "calcium", unit: "mg", dailyField: "calciumMg" },
+  { recordField: "iron", unit: "mg", dailyField: "ironMg" },
+  { recordField: "magnesium", unit: "mg", dailyField: "magnesiumMg" },
+  { recordField: "zinc", unit: "mg", dailyField: "zincMg" },
+  { recordField: "vitaminA", unit: "mcg", dailyField: "vitaminAMcg" },
+  { recordField: "vitaminB6", unit: "mg", dailyField: "vitaminB6Mg" },
+  { recordField: "vitaminB12", unit: "mcg", dailyField: "vitaminB12Mcg" },
+  { recordField: "vitaminC", unit: "mg", dailyField: "vitaminCMg" },
+  { recordField: "vitaminD", unit: "mcg", dailyField: "vitaminDMcg" },
+  { recordField: "vitaminE", unit: "mg", dailyField: "vitaminEMg" },
+  { recordField: "vitaminK", unit: "mcg", dailyField: "vitaminKMcg" },
 ];
 
 const additionalNutrientFields: NutritionFieldConfig[] = [
-  { recordField: 'biotin', unit: 'mcg' },
-  { recordField: 'chloride', unit: 'mg' },
-  { recordField: 'chromium', unit: 'mcg' },
-  { recordField: 'copper', unit: 'mg' },
-  { recordField: 'folate', unit: 'mcg' },
-  { recordField: 'folicAcid', unit: 'mcg' },
-  { recordField: 'iodine', unit: 'mcg' },
-  { recordField: 'manganese', unit: 'mg' },
-  { recordField: 'molybdenum', unit: 'mcg' },
-  { recordField: 'niacin', unit: 'mg' },
-  { recordField: 'pantothenicAcid', unit: 'mg' },
-  { recordField: 'phosphorus', unit: 'mg' },
-  { recordField: 'riboflavin', unit: 'mg' },
-  { recordField: 'selenium', unit: 'mcg' },
-  { recordField: 'thiamin', unit: 'mg' },
-  { recordField: 'unsaturatedFat', unit: 'g' },
+  { recordField: "biotin", unit: "mcg" },
+  { recordField: "chloride", unit: "mg" },
+  { recordField: "chromium", unit: "mcg" },
+  { recordField: "copper", unit: "mg" },
+  { recordField: "folate", unit: "mcg" },
+  { recordField: "folicAcid", unit: "mcg" },
+  { recordField: "iodine", unit: "mcg" },
+  { recordField: "manganese", unit: "mg" },
+  { recordField: "molybdenum", unit: "mcg" },
+  { recordField: "niacin", unit: "mg" },
+  { recordField: "pantothenicAcid", unit: "mg" },
+  { recordField: "phosphorus", unit: "mg" },
+  { recordField: "riboflavin", unit: "mg" },
+  { recordField: "selenium", unit: "mcg" },
+  { recordField: "thiamin", unit: "mg" },
+  { recordField: "unsaturatedFat", unit: "g" },
 ];
 
 const knownNutrientFields = new Set([
@@ -226,15 +253,15 @@ const knownNutrientFields = new Set([
 ]);
 
 const nonNutrientRecordFields = new Set([
-  'metadata',
-  'startTime',
-  'endTime',
-  'time',
-  'name',
-  'mealName',
-  'mealType',
-  'dataOrigin',
-  'zoneOffset',
+  "metadata",
+  "startTime",
+  "endTime",
+  "time",
+  "name",
+  "mealName",
+  "mealType",
+  "dataOrigin",
+  "zoneOffset",
 ]);
 
 type DailyAggregateGroup = {
@@ -264,7 +291,7 @@ function sourceDevice(metadata?: RecordMetadata): string | undefined {
 
   return [metadata.device.manufacturer, metadata.device.model]
     .filter(Boolean)
-    .join(' ')
+    .join(" ")
     .trim();
 }
 
@@ -274,7 +301,7 @@ function providerId(recordType: RecordType, record: TimedRecord) {
 
   return (
     record.metadata?.id ??
-    `${recordType}:${record.metadata?.dataOrigin ?? 'unknown'}:${start}:${end}`
+    `${recordType}:${record.metadata?.dataOrigin ?? "unknown"}:${start}:${end}`
   );
 }
 
@@ -306,7 +333,7 @@ function healthSample({
 
   return {
     sampleId: `health_connect:${recordType}:${metadata?.id ?? index}:${resolvedStart}`,
-    platform: 'health_connect',
+    platform: "health_connect",
     recordType: `${recordType}Record`,
     canonicalType,
     sourceApp: metadata?.dataOrigin,
@@ -357,7 +384,7 @@ async function readAllRecords<T extends RecordType>(
     const response = await withTimeout(
       readRecords(recordType, {
         timeRangeFilter: {
-          operator: 'between',
+          operator: "between",
           startTime: range.startDate.toISOString(),
           endTime: range.endDate.toISOString(),
         },
@@ -372,7 +399,9 @@ async function readAllRecords<T extends RecordType>(
     pageToken = response.pageToken;
 
     if (pageToken && page >= maxPagesPerType) {
-      throw new Error(`${recordType} hit the ${maxPagesPerType * pageSize} record safety cap`);
+      throw new Error(
+        `${recordType} hit the ${maxPagesPerType * pageSize} record safety cap`,
+      );
     }
   } while (pageToken);
 
@@ -384,28 +413,47 @@ async function readDailyAggregates<T extends AggregateResultRecordType>(
   range: SyncRange,
   dataOriginFilter?: string[],
 ) {
-  return withTimeout(
-    aggregateGroupByDuration({
-      recordType,
-      timeRangeFilter: {
-        operator: 'between',
-        startTime: range.startDate.toISOString(),
-        endTime: range.endDate.toISOString(),
-      },
-      timeRangeSlicer: {
-        duration: 'DAYS',
-        length: 1,
-      },
-      dataOriginFilter,
-    }),
-    `${recordType} daily aggregate`,
-  );
+  const ranges = chunkedAggregateRecordTypes.has(recordType)
+    ? splitSyncRangeByDays(range, aggregateChunkDays)
+    : [range];
+  const groups = [];
+
+  for (const [index, chunk] of ranges.entries()) {
+    const label =
+      ranges.length > 1
+        ? `${recordType} daily aggregate chunk ${index + 1}/${ranges.length}`
+        : `${recordType} daily aggregate`;
+
+    groups.push(
+      ...(await withTimeout(
+        aggregateGroupByDuration({
+          recordType,
+          timeRangeFilter: {
+            operator: "between",
+            startTime: chunk.startDate.toISOString(),
+            endTime: chunk.endDate.toISOString(),
+          },
+          timeRangeSlicer: {
+            duration: "DAYS",
+            length: 1,
+          },
+          dataOriginFilter,
+        }),
+        label,
+      )),
+    );
+  }
+
+  return groups;
 }
 
 function aggregateDataOrigins(group: DailyAggregateGroup): string[] {
   const origins = group.result.dataOrigins;
   return Array.isArray(origins)
-    ? origins.filter((origin): origin is string => typeof origin === 'string' && origin.length > 0)
+    ? origins.filter(
+        (origin): origin is string =>
+          typeof origin === "string" && origin.length > 0,
+      )
     : [];
 }
 
@@ -418,7 +466,7 @@ function stepSourceRank(candidates: StepAggregateCandidate[]) {
   const rank = new Map<string, { days: number; total: number }>();
 
   candidates.forEach((candidate) => {
-    const source = candidate.sourceApp ?? 'unknown';
+    const source = candidate.sourceApp ?? "unknown";
     const current = rank.get(source) ?? { days: 0, total: 0 };
     current.days += 1;
     current.total += candidate.value;
@@ -432,19 +480,23 @@ function chooseStepCandidate(
   candidates: StepAggregateCandidate[],
   rank: Map<string, { days: number; total: number }>,
 ): StepAggregateCandidate {
-  return candidates
-    .slice()
-    .sort((left, right) => {
-      const leftRank = rank.get(left.sourceApp ?? 'unknown') ?? { days: 0, total: 0 };
-      const rightRank = rank.get(right.sourceApp ?? 'unknown') ?? { days: 0, total: 0 };
+  return candidates.slice().sort((left, right) => {
+    const leftRank = rank.get(left.sourceApp ?? "unknown") ?? {
+      days: 0,
+      total: 0,
+    };
+    const rightRank = rank.get(right.sourceApp ?? "unknown") ?? {
+      days: 0,
+      total: 0,
+    };
 
-      return (
-        rightRank.days - leftRank.days ||
-        rightRank.total - leftRank.total ||
-        right.value - left.value ||
-        (left.sourceApp ?? '').localeCompare(right.sourceApp ?? '')
-      );
-    })[0];
+    return (
+      rightRank.days - leftRank.days ||
+      rightRank.total - leftRank.total ||
+      right.value - left.value ||
+      (left.sourceApp ?? "").localeCompare(right.sourceApp ?? "")
+    );
+  })[0];
 }
 
 async function stepAggregateCandidatesByDate(
@@ -455,7 +507,9 @@ async function stepAggregateCandidatesByDate(
   dataOrigins: string[];
   groupsRead: number;
 }> {
-  const dataOrigins = Array.from(new Set(groups.flatMap(aggregateDataOrigins))).sort();
+  const dataOrigins = Array.from(
+    new Set(groups.flatMap(aggregateDataOrigins)),
+  ).sort();
   const candidatesByDate = new Map<string, StepAggregateCandidate[]>();
 
   if (dataOrigins.length <= 1) {
@@ -481,7 +535,7 @@ async function stepAggregateCandidatesByDate(
 
   let groupsRead = 0;
   for (const dataOrigin of dataOrigins) {
-    const originGroups = (await readDailyAggregates('Steps', range, [
+    const originGroups = (await readDailyAggregates("Steps", range, [
       dataOrigin,
     ])) as DailyAggregateGroup[];
     groupsRead += originGroups.length;
@@ -520,7 +574,7 @@ function aggregateSample({
 }): HealthSample {
   return {
     sampleId: `health_connect:daily:${config.canonicalType}:${group.startTime}`,
-    platform: 'health_connect',
+    platform: "health_connect",
     recordType: `${config.recordType}Record`,
     canonicalType: config.canonicalType,
     sourceApp,
@@ -542,27 +596,31 @@ function exerciseTypeName(value?: number): string | undefined {
     return undefined;
   }
 
-  return Object.entries(ExerciseType).find(([, candidate]) => candidate === value)?.[0];
+  return Object.entries(ExerciseType).find(
+    ([, candidate]) => candidate === value,
+  )?.[0];
 }
 
 function sportBucket(type?: number, title?: string): SportBucket {
-  const normalized = `${exerciseTypeName(type) ?? ''} ${title ?? ''}`.toLowerCase();
+  const normalized =
+    `${exerciseTypeName(type) ?? ""} ${title ?? ""}`.toLowerCase();
 
-  if (normalized.includes('running')) return 'run';
-  if (normalized.includes('biking') || normalized.includes('cycling')) return 'ride';
+  if (normalized.includes("running")) return "run";
+  if (normalized.includes("biking") || normalized.includes("cycling"))
+    return "ride";
   if (
-    normalized.includes('strength') ||
-    normalized.includes('weight') ||
-    normalized.includes('deadlift') ||
-    normalized.includes('bench') ||
-    normalized.includes('squat')
+    normalized.includes("strength") ||
+    normalized.includes("weight") ||
+    normalized.includes("deadlift") ||
+    normalized.includes("bench") ||
+    normalized.includes("squat")
   ) {
-    return 'strength';
+    return "strength";
   }
-  if (normalized.includes('swimming')) return 'swim';
-  if (normalized.includes('walking')) return 'walk';
+  if (normalized.includes("swimming")) return "swim";
+  if (normalized.includes("walking")) return "walk";
 
-  return 'other';
+  return "other";
 }
 
 function numeric(value: unknown): number | undefined {
@@ -595,10 +653,10 @@ function kilocalories(value: any): number | undefined {
 }
 
 function nutrientValue(value: any, unit: NutritionUnit): number | undefined {
-  if (unit === 'kcal') return kilocalories(value);
-  if (unit === 'g') return grams(value);
-  if (unit === 'mg') return milligrams(value);
-  if (unit === 'mcg') return micrograms(value);
+  if (unit === "kcal") return kilocalories(value);
+  if (unit === "g") return grams(value);
+  if (unit === "mg") return milligrams(value);
+  if (unit === "mcg") return micrograms(value);
   return numeric(value);
 }
 
@@ -624,10 +682,14 @@ function addNutrientTotal(
     return;
   }
 
-  accumulator.allNutrients[nutrient] = (accumulator.allNutrients[nutrient] ?? 0) + value;
+  accumulator.allNutrients[nutrient] =
+    (accumulator.allNutrients[nutrient] ?? 0) + value;
 }
 
-function mergeSourceModifiedAt(accumulator: NutritionAccumulator, value?: string) {
+function mergeSourceModifiedAt(
+  accumulator: NutritionAccumulator,
+  value?: string,
+) {
   if (!value) {
     return;
   }
@@ -653,7 +715,10 @@ function addNutritionField(
   addNutrientTotal(accumulator, config.recordField, value);
 }
 
-function addUnsupportedNumericNutrients(accumulator: NutritionAccumulator, record: any) {
+function addUnsupportedNumericNutrients(
+  accumulator: NutritionAccumulator,
+  record: any,
+) {
   Object.entries(record).forEach(([field, value]) => {
     if (knownNutrientFields.has(field) || nonNutrientRecordFields.has(field)) {
       return;
@@ -697,9 +762,11 @@ function addNutritionRecord(
   accumulator.entryCount += 1;
   accumulator.records.push(record);
 
-  [...supportedNutritionFields, ...additionalNutrientFields].forEach((field) => {
-    addNutritionField(accumulator, record, field);
-  });
+  [...supportedNutritionFields, ...additionalNutrientFields].forEach(
+    (field) => {
+      addNutritionField(accumulator, record, field);
+    },
+  );
   addUnsupportedNumericNutrients(accumulator, record);
 
   if (record.name || record.mealName || record.mealType != null) {
@@ -717,19 +784,23 @@ function addHydrationRecord(
   const accumulator = getNutritionAccumulator(map, date);
   accumulator.entryCount += 1;
   accumulator.records.push(record);
-  addNumber(accumulator, 'waterMl', numeric(record.volume?.inMilliliters));
+  addNumber(accumulator, "waterMl", numeric(record.volume?.inMilliliters));
 
   mergeSourceModifiedAt(accumulator, record.metadata?.lastModifiedTime);
 }
 
-function finalizeNutrition(records: Map<string, NutritionAccumulator>): NutritionDailyRecord[] {
-  return [...records.values()].map(({ records: rawRecords, allNutrients, ...record }) => ({
-    ...record,
-    allNutrientsJson: safeJsonStringify({
-      totals: allNutrients,
-      records: rawRecords,
+function finalizeNutrition(
+  records: Map<string, NutritionAccumulator>,
+): NutritionDailyRecord[] {
+  return [...records.values()].map(
+    ({ records: rawRecords, allNutrients, ...record }) => ({
+      ...record,
+      allNutrientsJson: safeJsonStringify({
+        totals: allNutrients,
+        records: rawRecords,
+      }),
     }),
-  }));
+  );
 }
 
 function parseSleepSession(record: any): SleepSessionRecord {
@@ -744,7 +815,10 @@ function parseSleepSession(record: any): SleepSessionRecord {
 
   for (const stage of stages) {
     const duration = secondsBetween(stage.startTime, stage.endTime);
-    if (stage.stage === SleepStageType.AWAKE || stage.stage === SleepStageType.OUT_OF_BED) {
+    if (
+      stage.stage === SleepStageType.AWAKE ||
+      stage.stage === SleepStageType.OUT_OF_BED
+    ) {
       awakeSeconds += duration;
       wakeupCount += 1;
       continue;
@@ -761,8 +835,8 @@ function parseSleepSession(record: any): SleepSessionRecord {
   }
 
   return {
-    sleepId: `health_connect:sleep:${providerId('SleepSession', record)}`,
-    platform: 'health_connect',
+    sleepId: `health_connect:sleep:${providerId("SleepSession", record)}`,
+    platform: "health_connect",
     sourceApp: record.metadata?.dataOrigin,
     startAt: record.startTime,
     endAt: record.endTime,
@@ -774,7 +848,9 @@ function parseSleepSession(record: any): SleepSessionRecord {
     remSleepSeconds,
     awakeSeconds,
     sleepStageJson: safeJsonStringify(stages),
-    sleepEfficiency: timeInBedSeconds ? sleepSeconds / timeInBedSeconds : undefined,
+    sleepEfficiency: timeInBedSeconds
+      ? sleepSeconds / timeInBedSeconds
+      : undefined,
     wakeupCount: wakeupCount || undefined,
     rawJson: safeJsonStringify(record),
   };
@@ -784,19 +860,23 @@ function parseWorkout(record: any): WorkoutRecord {
   const elapsedSeconds = secondsBetween(record.startTime, record.endTime);
 
   return {
-    workoutId: `health_connect:workout:${providerId('ExerciseSession', record)}`,
-    platform: 'health_connect',
+    workoutId: `health_connect:workout:${providerId("ExerciseSession", record)}`,
+    platform: "health_connect",
     sourceApp: record.metadata?.dataOrigin,
     startAt: record.startTime,
     endAt: record.endTime,
     localDate: localDateKey(record.startTime),
     name: record.title,
-    activityType: exerciseTypeName(record.exerciseType) ?? String(record.exerciseType ?? 'unknown'),
+    activityType:
+      exerciseTypeName(record.exerciseType) ??
+      String(record.exerciseType ?? "unknown"),
     sportBucket: sportBucket(record.exerciseType, record.title),
     elapsedSeconds,
     routeAvailable: Boolean(record.exerciseRoute),
     lapsJson: record.laps ? safeJsonStringify(record.laps) : undefined,
-    streamsJson: record.segments ? safeJsonStringify(record.segments) : undefined,
+    streamsJson: record.segments
+      ? safeJsonStringify(record.segments)
+      : undefined,
     rawJson: safeJsonStringify(record),
   };
 }
@@ -808,23 +888,28 @@ export async function openAndroidHealthSettings(): Promise<void> {
 export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
   const status = await getSdkStatus();
   if (status === SdkAvailabilityStatus.SDK_UNAVAILABLE) {
-    throw new Error('Health Connect is not available on this device.');
+    throw new Error("Health Connect is not available on this device.");
   }
-  if (status === SdkAvailabilityStatus.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED) {
-    throw new Error('Health Connect needs to be installed or updated.');
+  if (
+    status === SdkAvailabilityStatus.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED
+  ) {
+    throw new Error("Health Connect needs to be installed or updated.");
   }
 
   const initialized = await initialize();
   if (!initialized) {
-    throw new Error('Health Connect could not be initialized.');
+    throw new Error("Health Connect could not be initialized.");
   }
 
   const granted = await requestPermission(permissionsForRange(range));
   const grantedKeys = new Set(
-    granted.map((permission) => `${permission.accessType}:${permission.recordType}`),
+    granted.map(
+      (permission) => `${permission.accessType}:${permission.recordType}`,
+    ),
   );
   const missing = permissions.filter(
-    (permission) => !grantedKeys.has(`${permission.accessType}:${permission.recordType}`),
+    (permission) =>
+      !grantedKeys.has(`${permission.accessType}:${permission.recordType}`),
   );
 
   const samples: HealthSample[] = [];
@@ -832,10 +917,14 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
   const sleepSessions: SleepSessionRecord[] = [];
   const nutrition = new Map<string, NutritionAccumulator>();
   const warnings = missing.length
-    ? [`Missing permissions: ${missing.map((permission) => permission.recordType).join(', ')}`]
+    ? [
+        `Missing permissions: ${missing.map((permission) => permission.recordType).join(", ")}`,
+      ]
     : [];
-  function permissionState(recordType: RecordType): HealthConnectReadDiagnostic['permission'] {
-    return grantedKeys.has(`read:${recordType}`) ? 'granted' : 'missing';
+  function permissionState(
+    recordType: RecordType,
+  ): HealthConnectReadDiagnostic["permission"] {
+    return grantedKeys.has(`read:${recordType}`) ? "granted" : "missing";
   }
 
   const diagnostics: HealthConnectReadDiagnostic[] = [
@@ -843,7 +932,7 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
       recordType: config.recordType,
       canonicalType: config.canonicalType,
       permission: permissionState(config.recordType),
-      readKind: 'aggregate' as const,
+      readKind: "aggregate" as const,
       recordsRead: 0,
       samplesWritten: 0,
     })),
@@ -851,7 +940,7 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
       recordType: config.recordType,
       canonicalType: config.canonicalType,
       permission: permissionState(config.recordType),
-      readKind: 'records' as const,
+      readKind: "records" as const,
       recordsRead: 0,
       samplesWritten: 0,
     })),
@@ -859,11 +948,17 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
 
   function updateDiagnostic(
     config: HealthConnectRecordConfig,
-    readKind: HealthConnectReadDiagnostic['readKind'],
-    values: Partial<Pick<HealthConnectReadDiagnostic, 'recordsRead' | 'samplesWritten' | 'message'>>,
+    readKind: HealthConnectReadDiagnostic["readKind"],
+    values: Partial<
+      Pick<
+        HealthConnectReadDiagnostic,
+        "recordsRead" | "samplesWritten" | "message"
+      >
+    >,
   ) {
     const diagnostic = diagnostics.find(
-      (item) => item.recordType === config.recordType && item.readKind === readKind,
+      (item) =>
+        item.recordType === config.recordType && item.readKind === readKind,
     );
     if (!diagnostic) {
       return;
@@ -878,26 +973,24 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
 
   for (const config of aggregateConfigs) {
     if (!hasReadPermission(config.recordType)) {
-      updateDiagnostic(config, 'aggregate', {
-        message: 'Permission missing; read skipped.',
+      updateDiagnostic(config, "aggregate", {
+        message: "Permission missing; read skipped.",
       });
       continue;
     }
 
     try {
       let samplesWritten = 0;
-      const groups = await readDailyAggregates(
+      const groups = (await readDailyAggregates(
         config.recordType as AggregateResultRecordType,
         range,
-      ) as DailyAggregateGroup[];
+      )) as DailyAggregateGroup[];
       let extraGroupsRead = 0;
       let successMessage: string | undefined;
 
-      if (config.recordType === 'Steps') {
-        const { candidatesByDate, dataOrigins, groupsRead } = await stepAggregateCandidatesByDate(
-          range,
-          groups,
-        );
+      if (config.recordType === "Steps") {
+        const { candidatesByDate, dataOrigins, groupsRead } =
+          await stepAggregateCandidatesByDate(range, groups);
         extraGroupsRead = groupsRead;
         const candidates = [...candidatesByDate.values()].flat();
         const rank = stepSourceRank(candidates);
@@ -915,7 +1008,7 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
                 config,
                 group: candidate.group,
                 value: candidate.value,
-                unit: 'count',
+                unit: "count",
                 sourceApp: candidate.sourceApp,
                 metadata: ignoredDataOrigins.length
                   ? {
@@ -938,30 +1031,30 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
           let value: number | undefined;
           let unit: string | undefined;
 
-          if (config.recordType === 'ActiveCaloriesBurned') {
+          if (config.recordType === "ActiveCaloriesBurned") {
             value = Number(result.ACTIVE_CALORIES_TOTAL?.inKilocalories ?? 0);
-            unit = 'kcal';
-          } else if (config.recordType === 'TotalCaloriesBurned') {
+            unit = "kcal";
+          } else if (config.recordType === "TotalCaloriesBurned") {
             value = Number(result.ENERGY_TOTAL?.inKilocalories ?? 0);
-            unit = 'kcal';
-          } else if (config.recordType === 'Distance') {
+            unit = "kcal";
+          } else if (config.recordType === "Distance") {
             value = Number(result.DISTANCE?.inMeters ?? 0);
-            unit = 'm';
-          } else if (config.recordType === 'HeartRate') {
+            unit = "m";
+          } else if (config.recordType === "HeartRate") {
             value = Number(result.BPM_AVG ?? 0);
-            unit = 'bpm';
+            unit = "bpm";
             if (!value || !result.MEASUREMENTS_COUNT) {
               return;
             }
-          } else if (config.recordType === 'RestingHeartRate') {
+          } else if (config.recordType === "RestingHeartRate") {
             value = Number(result.BPM_AVG ?? 0);
-            unit = 'bpm';
+            unit = "bpm";
             if (!value) {
               return;
             }
-          } else if (config.recordType === 'SleepSession') {
+          } else if (config.recordType === "SleepSession") {
             value = Number(result.SLEEP_DURATION_TOTAL ?? 0);
-            unit = 's';
+            unit = "s";
             if (!value) {
               return;
             }
@@ -973,36 +1066,34 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
               group,
               value,
               unit,
-              sourceApp: dataOrigins.join(', '),
+              sourceApp: dataOrigins.join(", "),
             }),
           );
           samplesWritten += 1;
         });
       }
 
-      updateDiagnostic(config, 'aggregate', {
+      updateDiagnostic(config, "aggregate", {
         recordsRead: groups.length + extraGroupsRead,
         samplesWritten,
         message:
           groups.length && samplesWritten
             ? successMessage
-            : 'Permission granted, but no aggregate data returned in range.',
+            : "Permission granted, but no aggregate data returned in range.",
       });
     } catch (error) {
       const message = String(error instanceof Error ? error.message : error);
-      updateDiagnostic(config, 'aggregate', {
+      updateDiagnostic(config, "aggregate", {
         message,
       });
-      warnings.push(
-        `${config.canonicalType}: ${message}`,
-      );
+      warnings.push(`${config.canonicalType}: ${message}`);
     }
   }
 
   for (const config of rawRecordConfigs) {
     if (!hasReadPermission(config.recordType)) {
-      updateDiagnostic(config, 'records', {
-        message: 'Permission missing; read skipped.',
+      updateDiagnostic(config, "records", {
+        message: "Permission missing; read skipped.",
       });
       continue;
     }
@@ -1015,34 +1106,34 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
         const anyRecord = record as any;
         const metadata = anyRecord.metadata as RecordMetadata | undefined;
 
-        if (config.recordType === 'ExerciseSession') {
+        if (config.recordType === "ExerciseSession") {
           const workout = parseWorkout(anyRecord);
           workouts.push(workout);
           samples.push(
             healthSample({
               recordType: config.recordType,
-              canonicalType: 'workout',
+              canonicalType: "workout",
               record: anyRecord,
               index,
               value: workout.elapsedSeconds / 60,
-              unit: 'min',
+              unit: "min",
               metadata,
             }),
           );
           return;
         }
 
-        if (config.recordType === 'SleepSession') {
+        if (config.recordType === "SleepSession") {
           const session = parseSleepSession(anyRecord);
           sleepSessions.push(session);
           samples.push(
             healthSample({
               recordType: config.recordType,
-              canonicalType: 'sleep_session',
+              canonicalType: "sleep_session",
               record: anyRecord,
               index,
               value: session.sleepSeconds,
-              unit: 's',
+              unit: "s",
               startAt: session.startAt,
               endAt: session.endAt,
               metadata,
@@ -1051,133 +1142,131 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
           return;
         }
 
-        if (config.recordType === 'HeartRateVariabilityRmssd') {
+        if (config.recordType === "HeartRateVariabilityRmssd") {
           samples.push(
             healthSample({
               recordType: config.recordType,
-              canonicalType: 'hrv_rmssd',
+              canonicalType: "hrv_rmssd",
               record: anyRecord,
               index,
               value: Number(anyRecord.heartRateVariabilityMillis),
-              unit: 'ms',
+              unit: "ms",
               metadata,
             }),
           );
           return;
         }
 
-        if (config.recordType === 'Weight') {
+        if (config.recordType === "Weight") {
           samples.push(
             healthSample({
               recordType: config.recordType,
-              canonicalType: 'weight',
+              canonicalType: "weight",
               record: anyRecord,
               index,
               value: numeric(anyRecord.weight?.inKilograms),
-              unit: 'kg',
+              unit: "kg",
               metadata,
             }),
           );
           return;
         }
 
-        if (config.recordType === 'BodyFat') {
+        if (config.recordType === "BodyFat") {
           samples.push(
             healthSample({
               recordType: config.recordType,
-              canonicalType: 'body_fat',
+              canonicalType: "body_fat",
               record: anyRecord,
               index,
               value: numeric(anyRecord.percentage),
-              unit: '%',
+              unit: "%",
               metadata,
             }),
           );
           return;
         }
 
-        if (config.recordType === 'LeanBodyMass') {
+        if (config.recordType === "LeanBodyMass") {
           samples.push(
             healthSample({
               recordType: config.recordType,
-              canonicalType: 'lean_body_mass',
+              canonicalType: "lean_body_mass",
               record: anyRecord,
               index,
               value: numeric(anyRecord.mass?.inKilograms),
-              unit: 'kg',
+              unit: "kg",
               metadata,
             }),
           );
           return;
         }
 
-        if (config.recordType === 'Nutrition') {
+        if (config.recordType === "Nutrition") {
           addNutritionRecord(nutrition, anyRecord);
           samples.push(
             healthSample({
               recordType: config.recordType,
-              canonicalType: 'nutrition',
+              canonicalType: "nutrition",
               record: anyRecord,
               index,
               value: kilocalories(anyRecord.energy),
-              unit: 'kcal',
+              unit: "kcal",
               metadata,
             }),
           );
           return;
         }
 
-        if (config.recordType === 'Hydration') {
+        if (config.recordType === "Hydration") {
           addHydrationRecord(nutrition, anyRecord);
           samples.push(
             healthSample({
               recordType: config.recordType,
-              canonicalType: 'hydration',
+              canonicalType: "hydration",
               record: anyRecord,
               index,
               value: numeric(anyRecord.volume?.inMilliliters),
-              unit: 'ml',
+              unit: "ml",
               metadata,
             }),
           );
           return;
         }
 
-        if (config.recordType === 'Vo2Max') {
+        if (config.recordType === "Vo2Max") {
           samples.push(
             healthSample({
               recordType: config.recordType,
-              canonicalType: 'vo2max',
+              canonicalType: "vo2max",
               record: anyRecord,
               index,
               value: Number(anyRecord.vo2MillilitersPerMinuteKilogram),
-              unit: 'ml/kg/min',
+              unit: "ml/kg/min",
               metadata,
             }),
           );
         }
       });
       const samplesWritten = samples.length - sampleStartCount;
-      updateDiagnostic(config, 'records', {
+      updateDiagnostic(config, "records", {
         recordsRead: records.length,
         samplesWritten,
         message: records.length
           ? undefined
-          : 'Permission granted, but no records returned in range.',
+          : "Permission granted, but no records returned in range.",
       });
     } catch (error) {
       const message = String(error instanceof Error ? error.message : error);
-      updateDiagnostic(config, 'records', {
+      updateDiagnostic(config, "records", {
         message,
       });
-      warnings.push(
-        `${config.canonicalType}: ${message}`,
-      );
+      warnings.push(`${config.canonicalType}: ${message}`);
     }
   }
 
   return {
-    provider: 'health_connect',
+    provider: "health_connect",
     samples,
     workouts,
     sleepSessions,
