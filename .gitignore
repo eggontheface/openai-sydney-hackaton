@@ -6,6 +6,7 @@ dist/
 build/
 coverage/
 web-build/
+.tmp/
 expo-env.d.ts
 
 # React Native / Expo
