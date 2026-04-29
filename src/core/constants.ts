@@ -8,6 +8,7 @@ import {
   Zap,
 } from 'lucide-react-native';
 
+import { buildTrainingLoadSnapshot } from '../coach/trainingLoad';
 import type { PipelineSnapshot } from '../health/types';
 import type { AppSettings } from '../storage/appSettings';
 import type { AnalyticsMetricConfig } from './types';
@@ -34,6 +35,7 @@ export const emptySnapshot: PipelineSnapshot = {
   history: [],
   recentWorkouts: [],
   recentSamples: [],
+  trainingLoad: buildTrainingLoadSnapshot(),
   recommendation: {
     readiness: null,
     readinessLabel: 'Connect',
