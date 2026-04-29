@@ -112,6 +112,22 @@ type MetricAvailabilityRow = {
   latest_date: string | null;
 };
 
+type TableCountRow = {
+  total: number;
+  first_date: string | null;
+  latest_date: string | null;
+};
+
+type LatestSampleByTypeRow = {
+  canonical_type: CanonicalType;
+  record_type: string;
+  source_app: string | null;
+  local_date: string;
+  start_at: string;
+  value: number | null;
+  unit: string | null;
+};
+
 type DailyMetricsRow = {
   date: string;
   data_completeness: DailyMetrics['dataCompleteness'];
@@ -153,6 +169,49 @@ type DailyMetricsRow = {
   lean_body_mass_kg: number | null;
   vo2max: number | null;
   generated_at: string;
+};
+
+export type CoachHealthContext = {
+  generatedAt: string;
+  hasSyncedHealthData: boolean;
+  sqliteTables: {
+    healthSamples: TableCountRow;
+    sleepSessions: TableCountRow;
+    workouts: TableCountRow;
+    nutritionDaily: TableCountRow;
+    dailyMetrics: TableCountRow;
+    syncRuns: {
+      total: number;
+      latestEndedAt: string | null;
+      latestStatus: SyncRunRow['status'] | null;
+      latestSampleCount: number | null;
+      latestRangeStart: string | null;
+      latestRangeEnd: string | null;
+    };
+  };
+  metricAvailability: MetricAvailability[];
+  latestSamplesByType: {
+    canonicalType: CanonicalType;
+    recordType: string;
+    sourceApp?: string;
+    localDate: string;
+    startAt: string;
+    value?: number;
+    unit?: string;
+  }[];
+  recentDailyMetrics: DailyMetrics[];
+  recentWorkouts: {
+    localDate: string;
+    name?: string;
+    activityType?: string;
+    sportBucket: SportBucket;
+    elapsedSeconds: number;
+    distanceKm?: number;
+    activeKcal?: number;
+    avgHrBpm?: number;
+    sourceApp?: string;
+  }[];
+  coachDataInstruction: string;
 };
 
 type WorkoutSummary = {
@@ -1280,6 +1339,157 @@ export async function getLastSyncRun(): Promise<SyncRunRow | null> {
   return db.getFirstAsync<SyncRunRow>(
     'SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1',
   );
+}
+
+export async function getCoachHealthContext({
+  rebuildDaily = true,
+}: {
+  rebuildDaily?: boolean;
+} = {}): Promise<CoachHealthContext> {
+  const db = await getDb();
+  if (rebuildDaily) {
+    await rebuildDailyMetrics();
+  }
+
+  const [
+    healthSamples,
+    sleepSessions,
+    workouts,
+    nutritionDaily,
+    dailyMetrics,
+    syncRunSummary,
+    latestSync,
+    availabilityRows,
+    latestSamples,
+    dailyRows,
+    workoutRows,
+  ] = await Promise.all([
+    db.getFirstAsync<TableCountRow>(`
+      SELECT COUNT(*) AS total, MIN(local_date) AS first_date, MAX(local_date) AS latest_date
+      FROM health_samples
+    `),
+    db.getFirstAsync<TableCountRow>(`
+      SELECT COUNT(*) AS total, MIN(wake_date) AS first_date, MAX(wake_date) AS latest_date
+      FROM sleep_sessions
+    `),
+    db.getFirstAsync<TableCountRow>(`
+      SELECT COUNT(*) AS total, MIN(local_date) AS first_date, MAX(local_date) AS latest_date
+      FROM workouts
+    `),
+    db.getFirstAsync<TableCountRow>(`
+      SELECT COUNT(*) AS total, MIN(date) AS first_date, MAX(date) AS latest_date
+      FROM nutrition_daily
+    `),
+    db.getFirstAsync<TableCountRow>(`
+      SELECT COUNT(*) AS total, MIN(date) AS first_date, MAX(date) AS latest_date
+      FROM daily_metrics
+      WHERE source_count > 0
+    `),
+    db.getFirstAsync<{ total: number }>('SELECT COUNT(*) AS total FROM sync_runs'),
+    db.getFirstAsync<SyncRunRow>('SELECT * FROM sync_runs ORDER BY ended_at DESC LIMIT 1'),
+    db.getAllAsync<MetricAvailabilityRow>(`
+      SELECT
+        canonical_type,
+        COUNT(*) AS sample_count,
+        COUNT(DISTINCT local_date) AS day_count,
+        MAX(local_date) AS latest_date
+      FROM health_samples
+      GROUP BY canonical_type
+    `),
+    db.getAllAsync<LatestSampleByTypeRow>(`
+      SELECT canonical_type, record_type, source_app, local_date, start_at, value, unit
+      FROM (
+        SELECT
+          canonical_type,
+          record_type,
+          source_app,
+          local_date,
+          start_at,
+          value,
+          unit,
+          ROW_NUMBER() OVER (
+            PARTITION BY canonical_type
+            ORDER BY start_at DESC, imported_at DESC
+          ) AS rank
+        FROM health_samples
+      )
+      WHERE rank = 1
+      ORDER BY canonical_type ASC
+    `),
+    db.getAllAsync<DailyMetricsRow>(`
+      SELECT *
+      FROM daily_metrics
+      WHERE source_count > 0
+      ORDER BY date DESC
+      LIMIT 14
+    `),
+    db.getAllAsync<WorkoutRow>('SELECT * FROM workouts ORDER BY start_at DESC'),
+  ]);
+
+  const healthSampleCount = Number(healthSamples?.total ?? 0);
+  const sleepSessionCount = Number(sleepSessions?.total ?? 0);
+  const workoutCount = Number(workouts?.total ?? 0);
+  const nutritionDayCount = Number(nutritionDaily?.total ?? 0);
+  const dailyMetricCount = Number(dailyMetrics?.total ?? 0);
+  const hasSyncedHealthData = Boolean(
+    healthSampleCount ||
+      sleepSessionCount ||
+      workoutCount ||
+      nutritionDayCount ||
+      dailyMetricCount,
+  );
+  const metricAvailability = buildMetricAvailability(
+    availabilityRows,
+    workoutRows,
+    sleepSessionCount,
+    nutritionDayCount,
+  );
+  const recentWorkouts = dedupeWorkoutRows(workoutRows).slice(0, 8);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    hasSyncedHealthData,
+    sqliteTables: {
+      healthSamples: healthSamples ?? { total: 0, first_date: null, latest_date: null },
+      sleepSessions: sleepSessions ?? { total: 0, first_date: null, latest_date: null },
+      workouts: workouts ?? { total: 0, first_date: null, latest_date: null },
+      nutritionDaily: nutritionDaily ?? { total: 0, first_date: null, latest_date: null },
+      dailyMetrics: dailyMetrics ?? { total: 0, first_date: null, latest_date: null },
+      syncRuns: {
+        total: Number(syncRunSummary?.total ?? 0),
+        latestEndedAt: latestSync?.ended_at ?? null,
+        latestStatus: latestSync?.status ?? null,
+        latestSampleCount: latestSync?.sample_count ?? null,
+        latestRangeStart: latestSync?.range_start ?? null,
+        latestRangeEnd: latestSync?.range_end ?? null,
+      },
+    },
+    metricAvailability,
+    latestSamplesByType: latestSamples.map((sample) => ({
+      canonicalType: sample.canonical_type,
+      recordType: sample.record_type,
+      sourceApp: sample.source_app ?? undefined,
+      localDate: sample.local_date,
+      startAt: sample.start_at,
+      value: sample.value ?? undefined,
+      unit: sample.unit ?? undefined,
+    })),
+    recentDailyMetrics: dailyRows.map(toDailyMetrics),
+    recentWorkouts: recentWorkouts.map((workout) => ({
+      localDate: workout.local_date,
+      name: workout.name ?? undefined,
+      activityType: workout.activity_type ?? undefined,
+      sportBucket: workout.sport_bucket,
+      elapsedSeconds: workout.elapsed_seconds,
+      distanceKm: workout.distance_km ?? undefined,
+      activeKcal: workout.active_kcal ?? undefined,
+      avgHrBpm: workout.avg_hr_bpm ?? undefined,
+      sourceApp: workout.source_app ?? undefined,
+    })),
+    coachDataInstruction: hasSyncedHealthData
+      ? 'SQLite contains synced health data. Do not tell the user there is no synced health data. If a specific metric is missing, name that exact missing metric instead.'
+      : 'SQLite has no synced health rows yet. Ask the user to sync a health source before making data-dependent claims.',
+  };
 }
 
 export async function getRecentSamples(limit = 12): Promise<HealthSampleRow[]> {

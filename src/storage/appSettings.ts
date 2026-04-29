@@ -2,6 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 
 export type AppSettings = {
   hasOpenAiApiKey: boolean;
+  openAiApiKeySource: 'secure_store' | 'env' | null;
   defaultSyncRangeDays: number;
 };
 
@@ -15,6 +16,11 @@ const fallbackSettings: StoredAppSettings = {
   defaultSyncRangeDays: 365,
 };
 const allowedSyncRanges = new Set([7, 30, 365]);
+
+function readEnvOpenAiApiKey(): string | null {
+  const apiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY?.trim();
+  return apiKey || null;
+}
 
 function normalizeSettings(settings: StoredAppSettings): StoredAppSettings {
   const defaultSyncRangeDays = allowedSyncRanges.has(Number(settings.defaultSyncRangeDays))
@@ -44,9 +50,11 @@ export async function loadAppSettings(): Promise<AppSettings> {
     loadStoredSettings(),
     SecureStore.getItemAsync(openAiApiKeyStorageKey),
   ]);
+  const envApiKey = readEnvOpenAiApiKey();
 
   return {
-    hasOpenAiApiKey: Boolean(apiKey),
+    hasOpenAiApiKey: Boolean(apiKey || envApiKey),
+    openAiApiKeySource: apiKey ? 'secure_store' : envApiKey ? 'env' : null,
     defaultSyncRangeDays: settings.defaultSyncRangeDays ?? 365,
   };
 }
@@ -78,5 +86,5 @@ export async function clearOpenAiApiKey(): Promise<AppSettings> {
 }
 
 export async function readOpenAiApiKey(): Promise<string | null> {
-  return SecureStore.getItemAsync(openAiApiKeyStorageKey);
+  return (await SecureStore.getItemAsync(openAiApiKeyStorageKey)) ?? readEnvOpenAiApiKey();
 }

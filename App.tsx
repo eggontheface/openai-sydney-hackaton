@@ -1,8 +1,9 @@
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   SafeAreaView,
@@ -24,7 +25,6 @@ import {
   HeartPulse,
   History,
   Lock,
-  Mic,
   Moon,
   MoreHorizontal,
   RefreshCw,
@@ -62,6 +62,7 @@ import {
 import {
   clearOpenAiApiKey,
   loadAppSettings,
+  readOpenAiApiKey,
   saveAppSettings,
   saveOpenAiApiKey,
 } from './src/storage/appSettings';
@@ -69,18 +70,25 @@ import type { AppSettings } from './src/storage/appSettings';
 import {
   clearPipeline,
   exportPipelineJson,
+  getCoachHealthContext,
   getLastSyncRun,
   getPipelineSnapshot,
   initTrainingStore,
   recordSyncRun,
   upsertSyncPayload,
 } from './src/storage/trainingStore';
+import {
+  openAiCoachModel,
+  sendCoachMessage,
+  type OpenAiCoachConversationMessage,
+} from './src/ai/openaiCoach';
 
 const ranges = [7, 30, 365];
 const baselineRangeDays = 365;
 
 const emptyAppSettings: AppSettings = {
   hasOpenAiApiKey: false,
+  openAiApiKeySource: null,
   defaultSyncRangeDays: baselineRangeDays,
 };
 
@@ -132,6 +140,12 @@ type LastSync = Awaited<ReturnType<typeof getLastSyncRun>>;
 type Tab = 'coach' | 'analytics' | 'history' | 'you';
 
 type MetricStatus = 'live' | 'permission' | 'empty' | 'unchecked';
+
+type CoachConversationMessage = {
+  id: string;
+  role: 'coach' | 'user';
+  text: string;
+};
 
 type AnalyticsMetricConfig = {
   id: string;
@@ -271,6 +285,26 @@ function dataAge(lastSync: LastSync): string {
   }
 
   return `Last sync ${formatShortDateTime(lastSync.ended_at)}`;
+}
+
+function createCoachMessage(
+  role: CoachConversationMessage['role'],
+  text: string,
+): CoachConversationMessage {
+  return {
+    id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    role,
+    text,
+  };
+}
+
+function toOpenAiConversation(
+  messages: CoachConversationMessage[],
+): OpenAiCoachConversationMessage[] {
+  return messages.map((message) => ({
+    role: message.role === 'coach' ? 'assistant' : 'user',
+    text: message.text,
+  }));
 }
 
 function AppButton({
@@ -470,18 +504,30 @@ function SmallMetric({
 }
 
 function CoachScreen({
+  coachBusy,
+  coachDraft,
+  coachMessages,
+  hasOpenAiApiKey,
   snapshot,
   lastSync,
   busy,
   status,
   warnings,
+  onChangeCoachDraft,
+  onSendCoachMessage,
   onSync,
 }: {
+  coachBusy: boolean;
+  coachDraft: string;
+  coachMessages: CoachConversationMessage[];
+  hasOpenAiApiKey: boolean;
   snapshot: PipelineSnapshot;
   lastSync: LastSync;
   busy: boolean;
   status: string;
   warnings: string[];
+  onChangeCoachDraft: (value: string) => void;
+  onSendCoachMessage: (message?: string) => void;
   onSync: () => void;
 }) {
   const current = snapshot.today;
@@ -495,9 +541,36 @@ function CoachScreen({
     .reverse()
     .map((row) => row.hrvLastNightAvg ?? row.restingHr ?? row.steps ?? 0)
     .slice(-10);
+  const quickReplies = ['Make it easier', 'Move it to tomorrow', "I'm short on time"];
+  const canSendCoachMessage = hasOpenAiApiKey && !coachBusy && Boolean(coachDraft.trim());
+  const composerPlaceholder = hasOpenAiApiKey
+    ? 'Ask your coach...'
+    : 'Save an OpenAI API key in You to chat';
+  const hasSyncedData =
+    snapshot.totalSamples > 0 ||
+    snapshot.workoutCount > 0 ||
+    snapshot.sleepCount > 0 ||
+    snapshot.nutritionDays > 0 ||
+    snapshot.coverageDays > 0;
+  const feedRef = useRef<ScrollView | null>(null);
+
+  function scrollFeedToEnd(animated = true) {
+    requestAnimationFrame(() => {
+      feedRef.current?.scrollToEnd({ animated });
+    });
+  }
+
+  useEffect(() => {
+    if (coachMessages.length || coachBusy) {
+      scrollFeedToEnd();
+    }
+  }, [coachBusy, coachMessages.length]);
 
   return (
-    <View style={styles.screen}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={styles.screen}
+    >
       <View style={styles.topBar}>
         <View style={styles.topBarLeft}>
           <CoachAvatar size={32} />
@@ -511,7 +584,17 @@ function CoachScreen({
         <MoreHorizontal color={tokens.muted} size={22} strokeWidth={2} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.feed} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.feed}
+        keyboardShouldPersistTaps="handled"
+        onContentSizeChange={() => {
+          if (coachMessages.length || coachBusy) {
+            scrollFeedToEnd();
+          }
+        }}
+        ref={feedRef}
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.dateDivider}>This morning</Text>
         <CoachLine first>{recommendation.opener}</CoachLine>
 
@@ -537,9 +620,6 @@ function CoachScreen({
         </DataCard>
 
         <CoachLine>{recommendation.reason}</CoachLine>
-        <UserBubble>So what should I do today?</UserBubble>
-
-        <CoachLine first>Glad you asked. Here's what I would run:</CoachLine>
 
         <DataCard accent={tokens.ink} label="Today's plan">
           <View style={styles.planHeader}>
@@ -565,7 +645,19 @@ function CoachScreen({
           </View>
         </DataCard>
 
-        {snapshot.totalSamples === 0 ? (
+        {coachMessages.length ? <Text style={styles.dateDivider}>Coach conversation</Text> : null}
+        {coachMessages.map((message) =>
+          message.role === 'user' ? (
+            <UserBubble key={message.id}>{message.text}</UserBubble>
+          ) : (
+            <CoachLine key={message.id}>{message.text}</CoachLine>
+          ),
+        )}
+        {coachBusy ? (
+          <CoachLine>Give me a second. I am checking your recent health data.</CoachLine>
+        ) : null}
+
+        {!hasSyncedData ? (
           <DataCard accent={tokens.accent} label="Datasource">
             <Text style={styles.helpText}>
               Health Connect is the source of truth. Syncing creates raw schema rows,
@@ -595,22 +687,56 @@ function CoachScreen({
       </ScrollView>
 
       <View style={styles.chips}>
-        {['Easier option', 'Move to tomorrow', "I'm short on time"].map((chip) => (
-          <View key={chip} style={styles.chip}>
+        {quickReplies.map((chip) => (
+          <Pressable
+            accessibilityRole="button"
+            disabled={coachBusy || !hasOpenAiApiKey}
+            key={chip}
+            onPress={() => onSendCoachMessage(chip)}
+            style={({ pressed }) => [
+              styles.chip,
+              (coachBusy || !hasOpenAiApiKey) && styles.disabled,
+              pressed && styles.pressed,
+            ]}
+          >
             <Text style={styles.chipText}>{chip}</Text>
-          </View>
+          </Pressable>
         ))}
       </View>
 
       <View style={styles.composer}>
         <View style={styles.composerInput}>
-          <Text style={styles.composerText}>Ask your coach…</Text>
+          <TextInput
+            accessibilityLabel="Ask your coach"
+            autoCorrect
+            editable={hasOpenAiApiKey && !coachBusy}
+            onChangeText={onChangeCoachDraft}
+            onSubmitEditing={() => onSendCoachMessage()}
+            placeholder={composerPlaceholder}
+            placeholderTextColor={tokens.muted}
+            returnKeyType="send"
+            style={styles.composerTextInput}
+            value={coachDraft}
+          />
         </View>
-        <View style={styles.micButton}>
-          <Mic color={tokens.surface} size={17} strokeWidth={2} />
-        </View>
+        <Pressable
+          accessibilityRole="button"
+          disabled={!canSendCoachMessage}
+          onPress={() => onSendCoachMessage()}
+          style={({ pressed }) => [
+            styles.sendButton,
+            !canSendCoachMessage && styles.disabled,
+            pressed && styles.pressed,
+          ]}
+        >
+          {coachBusy ? (
+            <ActivityIndicator color={tokens.surface} size="small" />
+          ) : (
+            <ArrowRight color={tokens.surface} size={18} strokeWidth={2.3} />
+          )}
+        </Pressable>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -975,6 +1101,13 @@ function SourceScreen({
   onSetDefaultRange: (value: number) => void;
 }) {
   const sourceLabel = currentHealthProviderLabel();
+  const apiKeyStatus =
+    appSettings.openAiApiKeySource === 'secure_store'
+      ? 'Saved on this device'
+      : appSettings.openAiApiKeySource === 'env'
+        ? 'Loaded from .env'
+        : 'Not saved';
+  const apiKeyPlaceholder = appSettings.hasOpenAiApiKey ? 'Replace active key' : 'sk-...';
   const diagnosticFocus: CanonicalType[] = [
     'sleep_session',
     'resting_heart_rate',
@@ -1111,16 +1244,14 @@ function SourceScreen({
             </View>
             <View style={styles.settingsCopy}>
               <Text style={styles.settingsTitle}>OpenAI API key</Text>
-              <Text style={styles.settingsMeta}>
-                {appSettings.hasOpenAiApiKey ? 'Saved on this device' : 'Not saved'}
-              </Text>
+              <Text style={styles.settingsMeta}>{apiKeyStatus}</Text>
             </View>
           </View>
           <TextInput
             autoCapitalize="none"
             autoCorrect={false}
             onChangeText={setApiKeyDraft}
-            placeholder={appSettings.hasOpenAiApiKey ? 'Replace saved key' : 'sk-...'}
+            placeholder={apiKeyPlaceholder}
             placeholderTextColor={tokens.muted}
             secureTextEntry
             style={styles.apiKeyInput}
@@ -1285,6 +1416,10 @@ export default function App() {
   const [lastSync, setLastSync] = useState<LastSync>(null);
   const [appSettings, setAppSettings] = useState<AppSettings>(emptyAppSettings);
   const [apiKeyDraft, setApiKeyDraft] = useState('');
+  const [coachDraft, setCoachDraft] = useState('');
+  const [coachMessages, setCoachMessages] = useState<CoachConversationMessage[]>([]);
+  const [coachBusy, setCoachBusy] = useState(false);
+  const [coachResponseId, setCoachResponseId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [status, setStatus] = useState('Ready');
@@ -1355,6 +1490,56 @@ export default function App() {
     }
   }
 
+  async function submitCoachMessage(messageOverride?: string) {
+    const text = (messageOverride ?? coachDraft).trim();
+    if (!text || coachBusy) {
+      return;
+    }
+
+    const apiKey = await readOpenAiApiKey();
+    if (!apiKey) {
+      setStatus('Save an OpenAI API key in You before messaging the coach.');
+      return;
+    }
+
+    const userMessage = createCoachMessage('user', text);
+    const requestConversation = toOpenAiConversation(coachMessages);
+
+    setCoachDraft('');
+    setCoachMessages((messages) => [...messages, userMessage]);
+    setCoachBusy(true);
+    setStatus(`Coach is checking SQLite health data with ${openAiCoachModel}`);
+
+    try {
+      const freshSnapshot = await getPipelineSnapshot();
+      const healthContext = await getCoachHealthContext({ rebuildDaily: false });
+      setSnapshot(freshSnapshot);
+      const response = await sendCoachMessage({
+        apiKey,
+        conversation: requestConversation,
+        healthContext,
+        previousResponseId: coachResponseId,
+        snapshot: freshSnapshot,
+        userMessage: text,
+      });
+      setCoachResponseId(response.responseId);
+      setCoachMessages((messages) => [...messages, createCoachMessage('coach', response.text)]);
+      setStatus(`Coach answered with ${openAiCoachModel}`);
+    } catch (error) {
+      const message = String(error instanceof Error ? error.message : error);
+      setStatus(message);
+      setCoachMessages((messages) => [
+        ...messages,
+        createCoachMessage(
+          'coach',
+          `I couldn't reach the OpenAI API. ${message}`,
+        ),
+      ]);
+    } finally {
+      setCoachBusy(false);
+    }
+  }
+
   async function runSync() {
     if (!canSync) {
       setStatus('Use an iOS or Android dev build.');
@@ -1420,7 +1605,13 @@ export default function App() {
         {activeTab === 'coach' ? (
           <CoachScreen
             busy={busy}
+            coachBusy={coachBusy}
+            coachDraft={coachDraft}
+            coachMessages={coachMessages}
+            hasOpenAiApiKey={appSettings.hasOpenAiApiKey}
             lastSync={lastSync}
+            onChangeCoachDraft={setCoachDraft}
+            onSendCoachMessage={submitCoachMessage}
             onSync={runSync}
             snapshot={snapshot}
             status={status}
@@ -1764,12 +1955,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 14,
   },
-  composerText: {
-    color: tokens.muted,
+  composerTextInput: {
+    color: tokens.ink,
     fontSize: 14,
     letterSpacing: 0,
+    minHeight: 42,
+    paddingVertical: 0,
   },
-  micButton: {
+  sendButton: {
     alignItems: 'center',
     backgroundColor: tokens.ink,
     borderRadius: 8,
