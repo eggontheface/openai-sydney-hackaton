@@ -85,6 +85,7 @@ export function CoachScreen({
 }) {
   const current = snapshot.today;
   const recommendation = snapshot.recommendation;
+  const readinessStatus = recommendation.readinessStatus;
   const accent = toneColor(recommendation.color);
   const plan = useMemo(
     () => generateTrainingPlan(snapshot, resolveTrainingGoal(goalText)),
@@ -119,6 +120,15 @@ export function CoachScreen({
   ];
   const coachInputDisabled = coachBusy || busy;
   const canSendCoachMessage = !coachBusy && !busy && Boolean(coachDraft.trim());
+  const readinessExplanation = [
+    readinessStatus.conservativeAdjustmentReason,
+    readinessStatus.staleSignalsIgnored.length
+      ? `Ignored: ${readinessStatus.staleSignalsIgnored.join(", ")}.`
+      : null,
+    readinessStatus.missingSignals.length
+      ? `Missing: ${readinessStatus.missingSignals.join(", ")}.`
+      : null,
+  ].filter((line): line is string => Boolean(line));
   const composerPlaceholder = hasOpenAiApiKey
     ? busy
       ? "Sync in progress..."
@@ -230,6 +240,11 @@ export function CoachScreen({
               value={sleep}
             />
             <SmallMetric
+              label="Status"
+              loading={loadingInitialMetrics}
+              value={readinessStatus.ui.label}
+            />
+            <SmallMetric
               label="Score"
               loading={loadingInitialMetrics}
               value={formatNumber(recommendation.readiness ?? undefined)}
@@ -250,6 +265,13 @@ export function CoachScreen({
               ? `Getting recent data from ${sourceLabel}.`
               : recommendation.reason}
           </Text>
+          {!loadingInitialMetrics
+            ? readinessExplanation.map((line) => (
+                <Text key={line} style={styles.helpText}>
+                  {line}
+                </Text>
+              ))
+            : null}
         </DataCard>
 
         <Pressable accessibilityRole="button" onPress={onOpenWorkout}>

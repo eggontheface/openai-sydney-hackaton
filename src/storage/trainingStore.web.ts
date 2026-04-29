@@ -10,6 +10,7 @@ import type {
   SyncRange,
 } from "../health/types";
 import { emptySnapshot } from "../core/constants";
+import { buildReadinessStatus } from "../coach/readinessStatus";
 import { buildTrainingLoadSnapshot } from "../coach/trainingLoad";
 import { buildPipelineExportArtifacts } from "../export/pipelineExport";
 import {
@@ -365,6 +366,16 @@ const demoSourceFreshness: SourceFreshness[] = [
   },
 ];
 
+const demoReadinessStatus = buildReadinessStatus({
+  score: 78,
+  signalsUsed: [
+    "Sleep is solid",
+    "RMSSD HRV is above its matching baseline",
+    "training load is unavailable",
+  ],
+  sourceFreshness: demoSourceFreshness,
+});
+
 const demoSnapshot: PipelineSnapshot = {
   totalSamples: 428,
   workoutCount: 9,
@@ -414,8 +425,9 @@ const demoSnapshot: PipelineSnapshot = {
   trainingLoad: buildTrainingLoadSnapshot(),
   recommendation: {
     readiness: 78,
-    readinessLabel: "Primed",
-    color: "positive",
+    readinessStatus: demoReadinessStatus,
+    readinessLabel: demoReadinessStatus.ui.label,
+    color: demoReadinessStatus.ui.color,
     title: "Aerobic base",
     detail: "40 min easy run, stay conversational",
     reason:

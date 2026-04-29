@@ -1,52 +1,60 @@
-export type HealthPlatform = 'health_connect' | 'healthkit';
+import type { ReadinessStatusContract } from "../coach/readinessStatus";
+
+export type HealthPlatform = "health_connect" | "healthkit";
 
 export type HealthProvider = HealthPlatform;
 
 export type CanonicalType =
-  | 'steps'
-  | 'active_energy'
-  | 'total_energy'
-  | 'distance'
-  | 'heart_rate'
-  | 'resting_heart_rate'
-  | 'hrv_rmssd'
-  | 'hrv_sdnn'
-  | 'sleep_session'
-  | 'workout'
-  | 'weight'
-  | 'body_fat'
-  | 'lean_body_mass'
-  | 'nutrition'
-  | 'hydration'
-  | 'vo2max';
+  | "steps"
+  | "active_energy"
+  | "total_energy"
+  | "distance"
+  | "heart_rate"
+  | "resting_heart_rate"
+  | "hrv_rmssd"
+  | "hrv_sdnn"
+  | "sleep_session"
+  | "workout"
+  | "weight"
+  | "body_fat"
+  | "lean_body_mass"
+  | "nutrition"
+  | "hydration"
+  | "vo2max";
 
 export type HealthMetric = CanonicalType;
 
-export type HrvCanonicalType = Extract<CanonicalType, 'hrv_rmssd' | 'hrv_sdnn'>;
+export type HrvCanonicalType = Extract<CanonicalType, "hrv_rmssd" | "hrv_sdnn">;
 
-export type HrvMethod = 'rmssd' | 'sdnn';
+export type HrvMethod = "rmssd" | "sdnn";
 
 export type HrvBaselineStatus =
-  | 'compatible'
-  | 'missing_current'
-  | 'insufficient_baseline'
-  | 'method_incompatible';
+  | "compatible"
+  | "missing_current"
+  | "insufficient_baseline"
+  | "method_incompatible";
 
-export type SportBucket = 'run' | 'ride' | 'strength' | 'swim' | 'walk' | 'other';
+export type SportBucket =
+  | "run"
+  | "ride"
+  | "strength"
+  | "swim"
+  | "walk"
+  | "other";
 
-export type SourceFreshnessState = 'fresh' | 'stale' | 'missing' | 'partial';
+export type SourceFreshnessState = "fresh" | "stale" | "missing" | "partial";
 
 export type SourceFreshnessDomain =
-  | 'sleep'
-  | 'workouts'
-  | 'steps'
-  | 'energy'
-  | 'hrv'
-  | 'resting_hr'
-  | 'nutrition'
-  | 'hydration'
-  | 'body_composition'
-  | 'check_ins';
+  | "sleep"
+  | "workouts"
+  | "steps"
+  | "energy"
+  | "hrv"
+  | "resting_hr"
+  | "nutrition"
+  | "hydration"
+  | "body_composition"
+  | "check_ins";
 
 export type SourceFreshness = {
   domain: SourceFreshnessDomain;
@@ -175,8 +183,8 @@ export type SyncResult = SyncPayload;
 export type HealthConnectReadDiagnostic = {
   recordType: string;
   canonicalType: CanonicalType;
-  permission: 'granted' | 'missing';
-  readKind: 'aggregate' | 'records';
+  permission: "granted" | "missing";
+  readKind: "aggregate" | "records";
   recordsRead: number;
   samplesWritten: number;
   message?: string;
@@ -191,7 +199,7 @@ export type MetricSummary = {
 
 export type DailyMetrics = {
   date: string;
-  dataCompleteness: 'empty' | 'partial' | 'full';
+  dataCompleteness: "empty" | "partial" | "full";
   wellnessDataStatus: string;
   sourceCount: number;
   hasPlatformWellness: boolean;
@@ -256,11 +264,22 @@ export type DailyMetrics = {
   generatedAt: string;
 };
 
-export type TrainingLoadStatus = 'unavailable' | 'source-provided' | 'derived' | 'stale';
+export type TrainingLoadStatus =
+  | "unavailable"
+  | "source-provided"
+  | "derived"
+  | "stale";
 
-export type TrainingLoadSourceKind = 'intervals_icu' | 'documented_local_model' | 'vendor';
+export type TrainingLoadSourceKind =
+  | "intervals_icu"
+  | "documented_local_model"
+  | "vendor";
 
-export type TrainingLoadDailyLoadUnit = 'intervals_icu_load' | 'tss' | 'trimp' | 'unknown';
+export type TrainingLoadDailyLoadUnit =
+  | "intervals_icu_load"
+  | "tss"
+  | "trimp"
+  | "unknown";
 
 export type TrainingLoadIntervalsFields = {
   ctl?: number;
@@ -284,10 +303,11 @@ export type TrainingLoadSnapshot = {
   limitations: string[];
 };
 
-export type CoachTone = 'positive' | 'warm' | 'cool' | 'neutral';
+export type CoachTone = "positive" | "warm" | "cool" | "neutral";
 
 export type CoachRecommendation = {
   readiness: number | null;
+  readinessStatus: ReadinessStatusContract;
   readinessLabel: string;
   color: CoachTone;
   title: string;
