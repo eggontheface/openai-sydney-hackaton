@@ -59,6 +59,7 @@ import type {
   MetricAvailability,
   PipelineSnapshot,
   SourceFreshness,
+  SyncRange,
   WorkoutRecord,
 } from './src/health/types';
 import {
@@ -81,7 +82,9 @@ import {
   exportPipelineJson,
   getCoachHealthContext,
   getLastSyncRun,
+  getLastSuccessfulSyncRun,
   getPipelineSnapshot,
+  getRecentSyncRuns,
   initTrainingStore,
   recordSyncRun,
   upsertSyncPayload,
@@ -148,6 +151,7 @@ const emptySnapshot: PipelineSnapshot = {
 };
 
 type LastSync = Awaited<ReturnType<typeof getLastSyncRun>>;
+type SyncRuns = Awaited<ReturnType<typeof getRecentSyncRuns>>;
 type Tab = 'coach' | 'workout' | 'analytics' | 'history' | 'you';
 
 type MetricStatus = 'live' | 'permission' | 'empty' | 'unchecked';
@@ -297,6 +301,45 @@ function dataAge(lastSync: LastSync): string {
   }
 
   return `Last sync ${formatShortDateTime(lastSync.ended_at)}`;
+}
+
+function providerName(provider: string): string {
+  if (provider === 'healthkit') {
+    return 'Apple Health';
+  }
+
+  if (provider === 'health_connect') {
+    return 'Health Connect';
+  }
+
+  return provider;
+}
+
+function syncRunRangeLabel(run: NonNullable<LastSync>): string {
+  return formatRange({
+    startDate: new Date(run.range_start),
+    endDate: new Date(run.range_end),
+  });
+}
+
+function makeIncrementalSyncRange(lastSuccessfulSync: LastSync): SyncRange | null {
+  if (!lastSuccessfulSync) {
+    return null;
+  }
+
+  const startDate = new Date(lastSuccessfulSync.range_end);
+  if (Number.isNaN(startDate.getTime())) {
+    return null;
+  }
+
+  startDate.setHours(0, 0, 0, 0);
+  const endDate = new Date();
+  if (startDate.getTime() > endDate.getTime()) {
+    startDate.setTime(endDate.getTime());
+    startDate.setHours(0, 0, 0, 0);
+  }
+
+  return { startDate, endDate };
 }
 
 function createCoachMessage(
@@ -1463,6 +1506,50 @@ function SourceFreshnessRow({ source }: { source: SourceFreshness }) {
   );
 }
 
+function SyncRunHistoryRow({ run }: { run: SyncRuns[number] }) {
+  const statusOk = run.status === 'ok';
+  const detailParts = [
+    providerName(run.provider),
+    run.sync_type === 'incremental' ? 'Incremental' : 'Manual',
+    syncRunRangeLabel(run),
+  ];
+  const countParts = [
+    `${run.sample_count.toLocaleString()} records`,
+    `${run.health_sample_count.toLocaleString()} samples`,
+    `${run.workout_count.toLocaleString()} workouts`,
+    `${run.sleep_session_count.toLocaleString()} sleep`,
+    `${run.nutrition_day_count.toLocaleString()} nutrition`,
+  ];
+
+  return (
+    <View style={styles.syncRunRow}>
+      <View style={styles.syncRunTopLine}>
+        <View style={styles.syncRunTitleWrap}>
+          <Text style={styles.syncRunTitle}>{formatShortDateTime(run.started_at)}</Text>
+          <Text style={styles.syncRunDetail}>{detailParts.join(' · ')}</Text>
+        </View>
+        <View style={[styles.syncRunBadge, statusOk ? styles.syncRunBadgeOk : styles.syncRunBadgeError]}>
+          <Text
+            style={[
+              styles.syncRunBadgeText,
+              statusOk ? styles.syncRunBadgeTextOk : styles.syncRunBadgeTextError,
+            ]}
+          >
+            {statusOk ? 'OK' : 'Error'}
+          </Text>
+        </View>
+      </View>
+      <Text style={styles.syncRunCounts}>{countParts.join(' · ')}</Text>
+      {run.warning_count || run.diagnostic_count ? (
+        <Text style={styles.syncRunDetail}>
+          {`${run.warning_count.toLocaleString()} warnings · ${run.diagnostic_count.toLocaleString()} diagnostics`}
+        </Text>
+      ) : null}
+      {run.error ? <Text style={styles.syncRunError}>{run.error}</Text> : null}
+    </View>
+  );
+}
+
 function hasDiagnosticSamples(
   diagnostics: HealthConnectReadDiagnostic[],
   types: CanonicalType[],
@@ -1476,6 +1563,8 @@ function hasDiagnosticSamples(
 function SourceScreen({
   snapshot,
   lastSync,
+  lastSuccessfulSync,
+  recentSyncRuns,
   appSettings,
   apiKeyDraft,
   settingsBusy,
@@ -1485,6 +1574,7 @@ function SourceScreen({
   setRangeDays,
   setApiKeyDraft,
   onSync,
+  onIncrementalSync,
   onExport,
   onClear,
   onSaveApiKey,
@@ -1493,6 +1583,8 @@ function SourceScreen({
 }: {
   snapshot: PipelineSnapshot;
   lastSync: LastSync;
+  lastSuccessfulSync: LastSync;
+  recentSyncRuns: SyncRuns;
   appSettings: AppSettings;
   apiKeyDraft: string;
   settingsBusy: boolean;
@@ -1502,6 +1594,7 @@ function SourceScreen({
   setRangeDays: (value: number) => void;
   setApiKeyDraft: (value: string) => void;
   onSync: () => void;
+  onIncrementalSync: () => void;
   onExport: () => void;
   onClear: () => void;
   onSaveApiKey: () => void;
@@ -1621,6 +1714,14 @@ function SourceScreen({
             variant="primary"
           />
           <AppButton
+            disabled={busy || !lastSuccessfulSync}
+            icon={History}
+            label="Incremental"
+            onPress={onIncrementalSync}
+          />
+        </View>
+        <View style={styles.actionsRow}>
+          <AppButton
             disabled={busy || snapshot.totalSamples === 0}
             icon={Download}
             label="Export"
@@ -1645,6 +1746,17 @@ function SourceScreen({
             onPress={onClear}
             variant="danger"
           />
+        </View>
+
+        <SectionLabel>Recent sync runs</SectionLabel>
+        <View style={styles.syncRunList}>
+          {recentSyncRuns.length ? (
+            recentSyncRuns.map((run) => (
+              <SyncRunHistoryRow key={run.id} run={run} />
+            ))
+          ) : (
+            <Text style={styles.emptyText}>No sync runs recorded yet.</Text>
+          )}
         </View>
 
         <SectionLabel>Local app settings</SectionLabel>
@@ -1837,6 +1949,8 @@ export default function App() {
   const [rangeDays, setRangeDays] = useState(baselineRangeDays);
   const [snapshot, setSnapshot] = useState<PipelineSnapshot>(emptySnapshot);
   const [lastSync, setLastSync] = useState<LastSync>(null);
+  const [lastSuccessfulSync, setLastSuccessfulSync] = useState<LastSync>(null);
+  const [recentSyncRuns, setRecentSyncRuns] = useState<SyncRuns>([]);
   const [appSettings, setAppSettings] = useState<AppSettings>(emptyAppSettings);
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [coachDraft, setCoachDraft] = useState('');
@@ -1853,12 +1967,16 @@ export default function App() {
   const canSync = Platform.OS === 'ios' || Platform.OS === 'android';
 
   async function refreshStore() {
-    const [nextSnapshot, nextLastSync] = await Promise.all([
+    const [nextSnapshot, nextLastSync, nextLastSuccessfulSync, nextRecentSyncRuns] = await Promise.all([
       getPipelineSnapshot(),
       getLastSyncRun(),
+      getLastSuccessfulSyncRun(),
+      getRecentSyncRuns(),
     ]);
     setSnapshot(nextSnapshot);
     setLastSync(nextLastSync);
+    setLastSuccessfulSync(nextLastSuccessfulSync);
+    setRecentSyncRuns(nextRecentSyncRuns);
   }
 
   useEffect(() => {
@@ -1974,7 +2092,7 @@ export default function App() {
     }
   }
 
-  async function runSync() {
+  async function runSync(syncType: 'manual' | 'incremental' = 'manual') {
     if (!canSync) {
       setStatus('Use an iOS or Android dev build.');
       return;
@@ -1982,21 +2100,35 @@ export default function App() {
 
     const provider = currentHealthProviderId();
     const startedAt = new Date().toISOString();
+    const syncRange = syncType === 'incremental' ? makeIncrementalSyncRange(lastSuccessfulSync) : range;
+
+    if (!syncRange) {
+      setStatus('Run a manual sync before incremental sync.');
+      return;
+    }
 
     setBusy(true);
     setWarnings([]);
-    setStatus(`Syncing ${formatRange(range)}`);
+    setStatus(`Syncing ${formatRange(syncRange)}`);
 
     try {
-      const result = await syncCurrentPlatform(range);
+      const result = await syncCurrentPlatform(syncRange);
       const saved = await upsertSyncPayload(result);
-      await recordSyncRun(result.provider, range, saved, startedAt);
+      await recordSyncRun(result.provider, syncRange, saved, startedAt, undefined, {
+        syncType,
+        healthSampleCount: result.samples.length,
+        workoutCount: result.workouts.length,
+        sleepSessionCount: result.sleepSessions.length,
+        nutritionDayCount: result.nutritionDaily.length,
+        warningCount: result.warnings.length,
+        diagnosticCount: result.diagnostics.length,
+      });
       setWarnings(result.warnings);
       setStatus(`Synced ${saved.toLocaleString()} records`);
       await refreshStore();
     } catch (error) {
       if (provider) {
-        await recordSyncRun(provider, range, 0, startedAt, error);
+        await recordSyncRun(provider, syncRange, 0, startedAt, error, { syncType });
       }
       setStatus(String(error instanceof Error ? error.message : error));
       await refreshStore();
@@ -2068,13 +2200,16 @@ export default function App() {
             appSettings={appSettings}
             busy={busy}
             lastSync={lastSync}
+            lastSuccessfulSync={lastSuccessfulSync}
             onClear={confirmClear}
             onClearApiKey={removeApiKey}
             onExport={runExport}
+            onIncrementalSync={() => void runSync('incremental')}
             onSaveApiKey={saveApiKey}
             onSetDefaultRange={setDefaultSyncRange}
             onSync={runSync}
             rangeDays={rangeDays}
+            recentSyncRuns={recentSyncRuns}
             setApiKeyDraft={setApiKeyDraft}
             setRangeDays={setRangeDays}
             settingsBusy={settingsBusy}
@@ -3442,6 +3577,77 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
     lineHeight: 16,
     marginTop: 2,
+  },
+  syncRunList: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  syncRunRow: {
+    borderBottomColor: tokens.lineSoft,
+    borderBottomWidth: 1,
+    gap: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  syncRunTopLine: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between',
+  },
+  syncRunTitleWrap: {
+    flex: 1,
+  },
+  syncRunTitle: {
+    color: tokens.ink,
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  syncRunDetail: {
+    color: tokens.muted,
+    fontSize: 11,
+    letterSpacing: 0,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  syncRunCounts: {
+    color: tokens.inkSoft,
+    fontSize: 11,
+    letterSpacing: 0,
+    lineHeight: 16,
+  },
+  syncRunError: {
+    color: tokens.danger,
+    fontSize: 11,
+    letterSpacing: 0,
+    lineHeight: 16,
+  },
+  syncRunBadge: {
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  syncRunBadgeOk: {
+    backgroundColor: tokens.accentSoft,
+  },
+  syncRunBadgeError: {
+    backgroundColor: '#fff4f2',
+  },
+  syncRunBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0,
+    textTransform: 'uppercase',
+  },
+  syncRunBadgeTextOk: {
+    color: tokens.accentDeep,
+  },
+  syncRunBadgeTextError: {
+    color: tokens.danger,
   },
   toggle: {
     backgroundColor: tokens.line,

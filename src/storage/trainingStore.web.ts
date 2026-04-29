@@ -55,13 +55,30 @@ export type WorkoutRow = {
 export type SyncRunRow = {
   id: number;
   provider: HealthProvider;
+  sync_type: 'manual' | 'incremental';
   started_at: string;
   ended_at: string;
   range_start: string;
   range_end: string;
   sample_count: number;
+  health_sample_count: number;
+  workout_count: number;
+  sleep_session_count: number;
+  nutrition_day_count: number;
+  warning_count: number;
+  diagnostic_count: number;
   status: 'ok' | 'error';
   error: string | null;
+};
+
+export type SyncRunDetails = {
+  syncType?: SyncRunRow['sync_type'];
+  healthSampleCount?: number;
+  workoutCount?: number;
+  sleepSessionCount?: number;
+  nutritionDayCount?: number;
+  warningCount?: number;
+  diagnosticCount?: number;
 };
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -338,14 +355,23 @@ const demoSnapshot: PipelineSnapshot = {
 let lastSync: SyncRunRow | null = {
   id: 1,
   provider: 'healthkit',
+  sync_type: 'manual',
   started_at: new Date(Date.now() - 38 * 60 * 1000).toISOString(),
   ended_at: new Date(Date.now() - 37 * 60 * 1000).toISOString(),
   range_start: dateKey(-7),
   range_end: dateKey(0),
   sample_count: demoSnapshot.totalSamples,
+  health_sample_count: demoSnapshot.totalSamples - demoSnapshot.workoutCount - demoSnapshot.sleepCount - demoSnapshot.nutritionDays,
+  workout_count: demoSnapshot.workoutCount,
+  sleep_session_count: demoSnapshot.sleepCount,
+  nutrition_day_count: demoSnapshot.nutritionDays,
+  warning_count: 0,
+  diagnostic_count: demoDiagnostics.length,
   status: 'ok',
   error: null,
 };
+
+let syncRuns: SyncRunRow[] = lastSync ? [lastSync] : [];
 
 export async function initTrainingStore(): Promise<void> {}
 
@@ -364,18 +390,27 @@ export async function recordSyncRun(
   sampleCount: number,
   startedAt: string,
   error?: unknown,
+  details: SyncRunDetails = {},
 ): Promise<void> {
   lastSync = {
     id: Date.now(),
     provider,
+    sync_type: details.syncType ?? 'manual',
     started_at: startedAt,
     ended_at: new Date().toISOString(),
     range_start: range.startDate.toISOString(),
     range_end: range.endDate.toISOString(),
     sample_count: sampleCount,
+    health_sample_count: details.healthSampleCount ?? sampleCount,
+    workout_count: details.workoutCount ?? 0,
+    sleep_session_count: details.sleepSessionCount ?? 0,
+    nutrition_day_count: details.nutritionDayCount ?? 0,
+    warning_count: details.warningCount ?? 0,
+    diagnostic_count: details.diagnosticCount ?? 0,
     status: error ? 'error' : 'ok',
     error: error instanceof Error ? error.message : error ? String(error) : null,
   };
+  syncRuns = [lastSync, ...syncRuns].slice(0, 12);
 }
 
 export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
@@ -473,6 +508,14 @@ export async function getLastSyncRun(): Promise<SyncRunRow | null> {
   return lastSync;
 }
 
+export async function getLastSuccessfulSyncRun(): Promise<SyncRunRow | null> {
+  return syncRuns.find((run) => run.status === 'ok') ?? null;
+}
+
+export async function getRecentSyncRuns(limit = 6): Promise<SyncRunRow[]> {
+  return syncRuns.slice(0, limit);
+}
+
 export async function getRecentSamples(): Promise<HealthSampleRow[]> {
   return [];
 }
@@ -483,6 +526,7 @@ export async function getRecentWorkouts(): Promise<WorkoutRow[]> {
 
 export async function clearPipeline(): Promise<void> {
   lastSync = null;
+  syncRuns = [];
 }
 
 export async function exportPipelineJson(): Promise<string> {
