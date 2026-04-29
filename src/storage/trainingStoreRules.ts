@@ -22,8 +22,27 @@ export type DailyNutritionRollup = {
   proteinG?: number;
   carbsG?: number;
   fatG?: number;
+  saturatedFatG?: number;
+  monounsaturatedFatG?: number;
+  polyunsaturatedFatG?: number;
+  transFatG?: number;
   fiberG?: number;
   sugarG?: number;
+  cholesterolMg?: number;
+  caffeineMg?: number;
+  sodiumMg?: number;
+  potassiumMg?: number;
+  calciumMg?: number;
+  ironMg?: number;
+  magnesiumMg?: number;
+  zincMg?: number;
+  vitaminAMcg?: number;
+  vitaminB6Mg?: number;
+  vitaminB12Mcg?: number;
+  vitaminCMg?: number;
+  vitaminDMcg?: number;
+  vitaminEMg?: number;
+  vitaminKMcg?: number;
   waterMl?: number;
 };
 
@@ -283,8 +302,27 @@ export function buildDailyMetricsRollup(input: DailyMetricsRollupInput): DailyMe
     proteinG: optionalNumber(input.nutrition?.proteinG),
     carbsG: optionalNumber(input.nutrition?.carbsG),
     fatG: optionalNumber(input.nutrition?.fatG),
+    saturatedFatG: optionalNumber(input.nutrition?.saturatedFatG),
+    monounsaturatedFatG: optionalNumber(input.nutrition?.monounsaturatedFatG),
+    polyunsaturatedFatG: optionalNumber(input.nutrition?.polyunsaturatedFatG),
+    transFatG: optionalNumber(input.nutrition?.transFatG),
     fiberG: optionalNumber(input.nutrition?.fiberG),
     sugarG: optionalNumber(input.nutrition?.sugarG),
+    cholesterolMg: optionalNumber(input.nutrition?.cholesterolMg),
+    caffeineMg: optionalNumber(input.nutrition?.caffeineMg),
+    sodiumMg: optionalNumber(input.nutrition?.sodiumMg),
+    potassiumMg: optionalNumber(input.nutrition?.potassiumMg),
+    calciumMg: optionalNumber(input.nutrition?.calciumMg),
+    ironMg: optionalNumber(input.nutrition?.ironMg),
+    magnesiumMg: optionalNumber(input.nutrition?.magnesiumMg),
+    zincMg: optionalNumber(input.nutrition?.zincMg),
+    vitaminAMcg: optionalNumber(input.nutrition?.vitaminAMcg),
+    vitaminB6Mg: optionalNumber(input.nutrition?.vitaminB6Mg),
+    vitaminB12Mcg: optionalNumber(input.nutrition?.vitaminB12Mcg),
+    vitaminCMg: optionalNumber(input.nutrition?.vitaminCMg),
+    vitaminDMcg: optionalNumber(input.nutrition?.vitaminDMcg),
+    vitaminEMg: optionalNumber(input.nutrition?.vitaminEMg),
+    vitaminKMcg: optionalNumber(input.nutrition?.vitaminKMcg),
     waterMl: optionalNumber(input.nutrition?.waterMl),
     weightKg: optionalNumber(input.weightKg),
     bodyFatPct: optionalNumber(input.bodyFatPct),

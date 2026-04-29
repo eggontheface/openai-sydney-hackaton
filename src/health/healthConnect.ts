@@ -142,12 +142,100 @@ type NutritionNumberField =
   | 'proteinG'
   | 'carbsG'
   | 'fatG'
+  | 'saturatedFatG'
+  | 'monounsaturatedFatG'
+  | 'polyunsaturatedFatG'
+  | 'transFatG'
   | 'fiberG'
   | 'sugarG'
   | 'cholesterolMg'
   | 'waterMl'
   | 'caffeineMg'
-  | 'sodiumMg';
+  | 'sodiumMg'
+  | 'potassiumMg'
+  | 'calciumMg'
+  | 'ironMg'
+  | 'magnesiumMg'
+  | 'zincMg'
+  | 'vitaminAMcg'
+  | 'vitaminB6Mg'
+  | 'vitaminB12Mcg'
+  | 'vitaminCMg'
+  | 'vitaminDMcg'
+  | 'vitaminEMg'
+  | 'vitaminKMcg';
+
+type NutritionUnit = 'kcal' | 'g' | 'mg' | 'mcg' | 'number';
+
+type NutritionFieldConfig = {
+  recordField: string;
+  unit: NutritionUnit;
+  dailyField?: NutritionNumberField;
+};
+
+const supportedNutritionFields: NutritionFieldConfig[] = [
+  { recordField: 'energy', unit: 'kcal', dailyField: 'kcalIn' },
+  { recordField: 'protein', unit: 'g', dailyField: 'proteinG' },
+  { recordField: 'totalCarbohydrate', unit: 'g', dailyField: 'carbsG' },
+  { recordField: 'totalFat', unit: 'g', dailyField: 'fatG' },
+  { recordField: 'saturatedFat', unit: 'g', dailyField: 'saturatedFatG' },
+  { recordField: 'monounsaturatedFat', unit: 'g', dailyField: 'monounsaturatedFatG' },
+  { recordField: 'polyunsaturatedFat', unit: 'g', dailyField: 'polyunsaturatedFatG' },
+  { recordField: 'transFat', unit: 'g', dailyField: 'transFatG' },
+  { recordField: 'dietaryFiber', unit: 'g', dailyField: 'fiberG' },
+  { recordField: 'sugar', unit: 'g', dailyField: 'sugarG' },
+  { recordField: 'cholesterol', unit: 'mg', dailyField: 'cholesterolMg' },
+  { recordField: 'caffeine', unit: 'mg', dailyField: 'caffeineMg' },
+  { recordField: 'sodium', unit: 'mg', dailyField: 'sodiumMg' },
+  { recordField: 'potassium', unit: 'mg', dailyField: 'potassiumMg' },
+  { recordField: 'calcium', unit: 'mg', dailyField: 'calciumMg' },
+  { recordField: 'iron', unit: 'mg', dailyField: 'ironMg' },
+  { recordField: 'magnesium', unit: 'mg', dailyField: 'magnesiumMg' },
+  { recordField: 'zinc', unit: 'mg', dailyField: 'zincMg' },
+  { recordField: 'vitaminA', unit: 'mcg', dailyField: 'vitaminAMcg' },
+  { recordField: 'vitaminB6', unit: 'mg', dailyField: 'vitaminB6Mg' },
+  { recordField: 'vitaminB12', unit: 'mcg', dailyField: 'vitaminB12Mcg' },
+  { recordField: 'vitaminC', unit: 'mg', dailyField: 'vitaminCMg' },
+  { recordField: 'vitaminD', unit: 'mcg', dailyField: 'vitaminDMcg' },
+  { recordField: 'vitaminE', unit: 'mg', dailyField: 'vitaminEMg' },
+  { recordField: 'vitaminK', unit: 'mcg', dailyField: 'vitaminKMcg' },
+];
+
+const additionalNutrientFields: NutritionFieldConfig[] = [
+  { recordField: 'biotin', unit: 'mcg' },
+  { recordField: 'chloride', unit: 'mg' },
+  { recordField: 'chromium', unit: 'mcg' },
+  { recordField: 'copper', unit: 'mg' },
+  { recordField: 'folate', unit: 'mcg' },
+  { recordField: 'folicAcid', unit: 'mcg' },
+  { recordField: 'iodine', unit: 'mcg' },
+  { recordField: 'manganese', unit: 'mg' },
+  { recordField: 'molybdenum', unit: 'mcg' },
+  { recordField: 'niacin', unit: 'mg' },
+  { recordField: 'pantothenicAcid', unit: 'mg' },
+  { recordField: 'phosphorus', unit: 'mg' },
+  { recordField: 'riboflavin', unit: 'mg' },
+  { recordField: 'selenium', unit: 'mcg' },
+  { recordField: 'thiamin', unit: 'mg' },
+  { recordField: 'unsaturatedFat', unit: 'g' },
+];
+
+const knownNutrientFields = new Set([
+  ...supportedNutritionFields.map((field) => field.recordField),
+  ...additionalNutrientFields.map((field) => field.recordField),
+]);
+
+const nonNutrientRecordFields = new Set([
+  'metadata',
+  'startTime',
+  'endTime',
+  'time',
+  'name',
+  'mealName',
+  'mealType',
+  'dataOrigin',
+  'zoneOffset',
+]);
 
 type DailyAggregateGroup = {
   result: Record<string, any>;
@@ -487,11 +575,31 @@ function grams(value: any): number | undefined {
 }
 
 function milligrams(value: any): number | undefined {
-  return numeric(value?.inMilligrams ?? (value?.inGrams != null ? value.inGrams * 1000 : undefined));
+  return numeric(
+    value?.inMilligrams ??
+      (value?.inGrams != null ? value.inGrams * 1000 : undefined) ??
+      (value?.inMicrograms != null ? value.inMicrograms / 1000 : undefined),
+  );
+}
+
+function micrograms(value: any): number | undefined {
+  return numeric(
+    value?.inMicrograms ??
+      (value?.inMilligrams != null ? value.inMilligrams * 1000 : undefined) ??
+      (value?.inGrams != null ? value.inGrams * 1000000 : undefined),
+  );
 }
 
 function kilocalories(value: any): number | undefined {
   return numeric(value?.inKilocalories);
+}
+
+function nutrientValue(value: any, unit: NutritionUnit): number | undefined {
+  if (unit === 'kcal') return kilocalories(value);
+  if (unit === 'g') return grams(value);
+  if (unit === 'mg') return milligrams(value);
+  if (unit === 'mcg') return micrograms(value);
+  return numeric(value);
 }
 
 function addNumber(
@@ -505,6 +613,60 @@ function addNumber(
 
   const current = Number(accumulator[field] ?? 0);
   (accumulator as Record<string, unknown>)[field] = current + value;
+}
+
+function addNutrientTotal(
+  accumulator: NutritionAccumulator,
+  nutrient: string,
+  value?: number,
+) {
+  if (value == null) {
+    return;
+  }
+
+  accumulator.allNutrients[nutrient] = (accumulator.allNutrients[nutrient] ?? 0) + value;
+}
+
+function mergeSourceModifiedAt(accumulator: NutritionAccumulator, value?: string) {
+  if (!value) {
+    return;
+  }
+
+  if (!accumulator.sourceModifiedAt || value > accumulator.sourceModifiedAt) {
+    accumulator.sourceModifiedAt = value;
+  }
+}
+
+function addNutritionField(
+  accumulator: NutritionAccumulator,
+  record: any,
+  config: NutritionFieldConfig,
+) {
+  const value = nutrientValue(record[config.recordField], config.unit);
+  if (value == null) {
+    return;
+  }
+
+  if (config.dailyField) {
+    addNumber(accumulator, config.dailyField, value);
+  }
+  addNutrientTotal(accumulator, config.recordField, value);
+}
+
+function addUnsupportedNumericNutrients(accumulator: NutritionAccumulator, record: any) {
+  Object.entries(record).forEach(([field, value]) => {
+    if (knownNutrientFields.has(field) || nonNutrientRecordFields.has(field)) {
+      return;
+    }
+
+    const amount =
+      grams(value) ??
+      milligrams(value) ??
+      micrograms(value) ??
+      kilocalories(value) ??
+      numeric(value);
+    addNutrientTotal(accumulator, field, amount);
+  });
 }
 
 function getNutritionAccumulator(
@@ -535,66 +697,16 @@ function addNutritionRecord(
   accumulator.entryCount += 1;
   accumulator.records.push(record);
 
-  addNumber(accumulator, 'kcalIn', kilocalories(record.energy));
-  addNumber(accumulator, 'proteinG', grams(record.protein));
-  addNumber(accumulator, 'carbsG', grams(record.totalCarbohydrate));
-  addNumber(accumulator, 'fatG', grams(record.totalFat));
-  addNumber(accumulator, 'fiberG', grams(record.dietaryFiber));
-  addNumber(accumulator, 'sugarG', grams(record.sugar));
-  addNumber(accumulator, 'cholesterolMg', milligrams(record.cholesterol));
-  addNumber(accumulator, 'caffeineMg', milligrams(record.caffeine));
-  addNumber(accumulator, 'sodiumMg', milligrams(record.sodium));
+  [...supportedNutritionFields, ...additionalNutrientFields].forEach((field) => {
+    addNutritionField(accumulator, record, field);
+  });
+  addUnsupportedNumericNutrients(accumulator, record);
 
-  const nutrientFields = [
-    'biotin',
-    'calcium',
-    'chloride',
-    'chromium',
-    'copper',
-    'folate',
-    'folicAcid',
-    'iodine',
-    'iron',
-    'magnesium',
-    'manganese',
-    'molybdenum',
-    'monounsaturatedFat',
-    'niacin',
-    'pantothenicAcid',
-    'phosphorus',
-    'polyunsaturatedFat',
-    'potassium',
-    'riboflavin',
-    'saturatedFat',
-    'selenium',
-    'thiamin',
-    'transFat',
-    'unsaturatedFat',
-    'vitaminA',
-    'vitaminB12',
-    'vitaminB6',
-    'vitaminC',
-    'vitaminD',
-    'vitaminE',
-    'vitaminK',
-    'zinc',
-  ];
-
-  for (const field of nutrientFields) {
-    const amount = grams(record[field]) ?? milligrams(record[field]);
-    if (amount == null) {
-      continue;
-    }
-    accumulator.allNutrients[field] = (accumulator.allNutrients[field] ?? 0) + amount;
-  }
-
-  if (record.name) {
+  if (record.name || record.mealName || record.mealType != null) {
     accumulator.mealCount = (accumulator.mealCount ?? 0) + 1;
   }
 
-  if (record.metadata?.lastModifiedTime) {
-    accumulator.sourceModifiedAt = record.metadata.lastModifiedTime;
-  }
+  mergeSourceModifiedAt(accumulator, record.metadata?.lastModifiedTime);
 }
 
 function addHydrationRecord(
@@ -606,6 +718,8 @@ function addHydrationRecord(
   accumulator.entryCount += 1;
   accumulator.records.push(record);
   addNumber(accumulator, 'waterMl', numeric(record.volume?.inMilliliters));
+
+  mergeSourceModifiedAt(accumulator, record.metadata?.lastModifiedTime);
 }
 
 function finalizeNutrition(records: Map<string, NutritionAccumulator>): NutritionDailyRecord[] {

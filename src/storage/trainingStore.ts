@@ -239,14 +239,74 @@ type DailyMetricsRow = {
   protein_g: number | null;
   carbs_g: number | null;
   fat_g: number | null;
+  saturated_fat_g: number | null;
+  monounsaturated_fat_g: number | null;
+  polyunsaturated_fat_g: number | null;
+  trans_fat_g: number | null;
   fiber_g: number | null;
   sugar_g: number | null;
+  cholesterol_mg: number | null;
+  caffeine_mg: number | null;
+  sodium_mg: number | null;
+  potassium_mg: number | null;
+  calcium_mg: number | null;
+  iron_mg: number | null;
+  magnesium_mg: number | null;
+  zinc_mg: number | null;
+  vitamin_a_mcg: number | null;
+  vitamin_b6_mg: number | null;
+  vitamin_b12_mcg: number | null;
+  vitamin_c_mg: number | null;
+  vitamin_d_mcg: number | null;
+  vitamin_e_mg: number | null;
+  vitamin_k_mcg: number | null;
   water_ml: number | null;
   weight_kg: number | null;
   body_fat_pct: number | null;
   lean_body_mass_kg: number | null;
   vo2max: number | null;
   generated_at: string;
+};
+
+const nutritionDailyAddedColumns: Record<string, string> = {
+  saturated_fat_g: 'REAL',
+  monounsaturated_fat_g: 'REAL',
+  polyunsaturated_fat_g: 'REAL',
+  trans_fat_g: 'REAL',
+  potassium_mg: 'REAL',
+  calcium_mg: 'REAL',
+  iron_mg: 'REAL',
+  magnesium_mg: 'REAL',
+  zinc_mg: 'REAL',
+  vitamin_a_mcg: 'REAL',
+  vitamin_b6_mg: 'REAL',
+  vitamin_b12_mcg: 'REAL',
+  vitamin_c_mg: 'REAL',
+  vitamin_d_mcg: 'REAL',
+  vitamin_e_mg: 'REAL',
+  vitamin_k_mcg: 'REAL',
+};
+
+const dailyMetricsAddedNutritionColumns: Record<string, string> = {
+  saturated_fat_g: 'REAL',
+  monounsaturated_fat_g: 'REAL',
+  polyunsaturated_fat_g: 'REAL',
+  trans_fat_g: 'REAL',
+  cholesterol_mg: 'REAL',
+  caffeine_mg: 'REAL',
+  sodium_mg: 'REAL',
+  potassium_mg: 'REAL',
+  calcium_mg: 'REAL',
+  iron_mg: 'REAL',
+  magnesium_mg: 'REAL',
+  zinc_mg: 'REAL',
+  vitamin_a_mcg: 'REAL',
+  vitamin_b6_mg: 'REAL',
+  vitamin_b12_mcg: 'REAL',
+  vitamin_c_mg: 'REAL',
+  vitamin_d_mcg: 'REAL',
+  vitamin_e_mg: 'REAL',
+  vitamin_k_mcg: 'REAL',
 };
 
 type GoalProfileRow = {
@@ -386,12 +446,20 @@ const sourceFreshnessConfigs: SourceFreshnessConfig[] = [
   {
     domain: 'nutrition',
     label: 'Nutrition',
-    canonicalTypes: ['nutrition', 'hydration'],
+    canonicalTypes: ['nutrition'],
     maxFreshAgeDays: 1,
     source: 'nutrition',
     todayIsPartial: true,
-    partialWhenMissingTypes: true,
-    missingLimitation: 'No imported nutrition or hydration rows are available.',
+    missingLimitation: 'No imported nutrition rows are available.',
+  },
+  {
+    domain: 'hydration',
+    label: 'Hydration',
+    canonicalTypes: ['hydration'],
+    maxFreshAgeDays: 1,
+    source: 'nutrition',
+    todayIsPartial: true,
+    missingLimitation: 'No imported hydration rows are available.',
   },
   {
     domain: 'body_composition',
@@ -731,7 +799,31 @@ async function freshnessStatsForWorkouts(
 
 async function freshnessStatsForNutrition(
   db: SQLite.SQLiteDatabase,
+  canonicalTypes: CanonicalType[],
 ): Promise<FreshnessStatsRow | null> {
+  const includesNutrition = canonicalTypes.includes('nutrition');
+  const includesHydration = canonicalTypes.includes('hydration');
+  const nutritionDailyFilters: string[] = [];
+  if (includesNutrition) {
+    nutritionDailyFilters.push(`(
+      kcal_in IS NOT NULL OR protein_g IS NOT NULL OR carbs_g IS NOT NULL OR fat_g IS NOT NULL OR
+      saturated_fat_g IS NOT NULL OR monounsaturated_fat_g IS NOT NULL OR
+      polyunsaturated_fat_g IS NOT NULL OR trans_fat_g IS NOT NULL OR fiber_g IS NOT NULL OR
+      sugar_g IS NOT NULL OR cholesterol_mg IS NOT NULL OR caffeine_mg IS NOT NULL OR
+      sodium_mg IS NOT NULL OR potassium_mg IS NOT NULL OR calcium_mg IS NOT NULL OR
+      iron_mg IS NOT NULL OR magnesium_mg IS NOT NULL OR zinc_mg IS NOT NULL OR
+      vitamin_a_mcg IS NOT NULL OR vitamin_b6_mg IS NOT NULL OR vitamin_b12_mcg IS NOT NULL OR
+      vitamin_c_mg IS NOT NULL OR vitamin_d_mcg IS NOT NULL OR vitamin_e_mg IS NOT NULL OR
+      vitamin_k_mcg IS NOT NULL
+    )`);
+  }
+  if (includesHydration) {
+    nutritionDailyFilters.push('water_ml IS NOT NULL');
+  }
+  const nutritionDailyWhere = nutritionDailyFilters.length
+    ? `WHERE ${nutritionDailyFilters.join(' OR ')}`
+    : '';
+
   return db.getFirstAsync<FreshnessStatsRow>(`
     SELECT
       COUNT(*) AS sample_count,
@@ -741,12 +833,13 @@ async function freshnessStatsForNutrition(
     FROM (
       SELECT date AS row_id, date AS date_key, COALESCE(source_modified_at, imported_at) AS updated_at
       FROM nutrition_daily
+      ${nutritionDailyWhere}
       UNION ALL
       SELECT sample_id AS row_id, local_date AS date_key, COALESCE(source_modified_at, end_at, imported_at) AS updated_at
       FROM health_samples
-      WHERE canonical_type IN ('nutrition', 'hydration')
+      WHERE canonical_type IN (${placeholders(canonicalTypes)})
     )
-  `);
+  `, ...canonicalTypes);
 }
 
 async function freshnessStatsFor(
@@ -762,7 +855,7 @@ async function freshnessStatsFor(
   }
 
   if (config.source === 'nutrition') {
-    return freshnessStatsForNutrition(db);
+    return freshnessStatsForNutrition(db, config.canonicalTypes);
   }
 
   if (config.source === 'check_ins') {
@@ -1036,8 +1129,27 @@ function toDailyMetrics(row: DailyMetricsRow): DailyMetrics {
     proteinG: optionalNumber(row.protein_g),
     carbsG: optionalNumber(row.carbs_g),
     fatG: optionalNumber(row.fat_g),
+    saturatedFatG: optionalNumber(row.saturated_fat_g),
+    monounsaturatedFatG: optionalNumber(row.monounsaturated_fat_g),
+    polyunsaturatedFatG: optionalNumber(row.polyunsaturated_fat_g),
+    transFatG: optionalNumber(row.trans_fat_g),
     fiberG: optionalNumber(row.fiber_g),
     sugarG: optionalNumber(row.sugar_g),
+    cholesterolMg: optionalNumber(row.cholesterol_mg),
+    caffeineMg: optionalNumber(row.caffeine_mg),
+    sodiumMg: optionalNumber(row.sodium_mg),
+    potassiumMg: optionalNumber(row.potassium_mg),
+    calciumMg: optionalNumber(row.calcium_mg),
+    ironMg: optionalNumber(row.iron_mg),
+    magnesiumMg: optionalNumber(row.magnesium_mg),
+    zincMg: optionalNumber(row.zinc_mg),
+    vitaminAMcg: optionalNumber(row.vitamin_a_mcg),
+    vitaminB6Mg: optionalNumber(row.vitamin_b6_mg),
+    vitaminB12Mcg: optionalNumber(row.vitamin_b12_mcg),
+    vitaminCMg: optionalNumber(row.vitamin_c_mg),
+    vitaminDMcg: optionalNumber(row.vitamin_d_mcg),
+    vitaminEMg: optionalNumber(row.vitamin_e_mg),
+    vitaminKMcg: optionalNumber(row.vitamin_k_mcg),
     waterMl: optionalNumber(row.water_ml),
     weightKg: optionalNumber(row.weight_kg),
     bodyFatPct: optionalNumber(row.body_fat_pct),
@@ -1078,6 +1190,23 @@ async function getDb(): Promise<SQLite.SQLiteDatabase> {
   }
 
   return dbPromise;
+}
+
+async function addMissingColumns(
+  db: SQLite.SQLiteDatabase,
+  tableName: string,
+  columns: Record<string, string>,
+): Promise<void> {
+  const existingColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${tableName})`);
+  const existingNames = new Set(existingColumns.map((column) => column.name));
+
+  for (const [columnName, columnType] of Object.entries(columns)) {
+    if (existingNames.has(columnName)) {
+      continue;
+    }
+
+    await db.execAsync(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnType};`);
+  }
 }
 
 async function migrateLegacyHealthSamples(db: SQLite.SQLiteDatabase): Promise<void> {
@@ -1211,12 +1340,28 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       protein_g REAL,
       carbs_g REAL,
       fat_g REAL,
+      saturated_fat_g REAL,
+      monounsaturated_fat_g REAL,
+      polyunsaturated_fat_g REAL,
+      trans_fat_g REAL,
       fiber_g REAL,
       sugar_g REAL,
       cholesterol_mg REAL,
       water_ml REAL,
       caffeine_mg REAL,
       sodium_mg REAL,
+      potassium_mg REAL,
+      calcium_mg REAL,
+      iron_mg REAL,
+      magnesium_mg REAL,
+      zinc_mg REAL,
+      vitamin_a_mcg REAL,
+      vitamin_b6_mg REAL,
+      vitamin_b12_mcg REAL,
+      vitamin_c_mg REAL,
+      vitamin_d_mcg REAL,
+      vitamin_e_mg REAL,
+      vitamin_k_mcg REAL,
       entry_count INTEGER NOT NULL,
       meal_count INTEGER,
       all_nutrients_json TEXT NOT NULL,
@@ -1262,8 +1407,27 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       protein_g REAL,
       carbs_g REAL,
       fat_g REAL,
+      saturated_fat_g REAL,
+      monounsaturated_fat_g REAL,
+      polyunsaturated_fat_g REAL,
+      trans_fat_g REAL,
       fiber_g REAL,
       sugar_g REAL,
+      cholesterol_mg REAL,
+      caffeine_mg REAL,
+      sodium_mg REAL,
+      potassium_mg REAL,
+      calcium_mg REAL,
+      iron_mg REAL,
+      magnesium_mg REAL,
+      zinc_mg REAL,
+      vitamin_a_mcg REAL,
+      vitamin_b6_mg REAL,
+      vitamin_b12_mcg REAL,
+      vitamin_c_mg REAL,
+      vitamin_d_mcg REAL,
+      vitamin_e_mg REAL,
+      vitamin_k_mcg REAL,
       water_ml REAL,
       weight_kg REAL,
       body_fat_pct REAL,
@@ -1317,6 +1481,8 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     );
   `);
 
+  await addMissingColumns(db, 'nutrition_daily', nutritionDailyAddedColumns);
+  await addMissingColumns(db, 'daily_metrics', dailyMetricsAddedNutritionColumns);
   await ensureHrvSchema(db);
 
   const legacyColumns = await db.getAllAsync<{ name: string }>(
@@ -1577,10 +1743,14 @@ export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
         `
           INSERT OR REPLACE INTO nutrition_daily (
             date, kcal_in, protein_g, carbs_g, fat_g, fiber_g, sugar_g,
-            cholesterol_mg, water_ml, caffeine_mg, sodium_mg, entry_count,
+            saturated_fat_g, monounsaturated_fat_g, polyunsaturated_fat_g,
+            trans_fat_g, cholesterol_mg, water_ml, caffeine_mg, sodium_mg,
+            potassium_mg, calcium_mg, iron_mg, magnesium_mg, zinc_mg,
+            vitamin_a_mcg, vitamin_b6_mg, vitamin_b12_mcg, vitamin_c_mg,
+            vitamin_d_mcg, vitamin_e_mg, vitamin_k_mcg, entry_count,
             meal_count, all_nutrients_json, source_modified_at, imported_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         nutrition.date,
         nutrition.kcalIn ?? null,
@@ -1589,10 +1759,26 @@ export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
         nutrition.fatG ?? null,
         nutrition.fiberG ?? null,
         nutrition.sugarG ?? null,
+        nutrition.saturatedFatG ?? null,
+        nutrition.monounsaturatedFatG ?? null,
+        nutrition.polyunsaturatedFatG ?? null,
+        nutrition.transFatG ?? null,
         nutrition.cholesterolMg ?? null,
         nutrition.waterMl ?? null,
         nutrition.caffeineMg ?? null,
         nutrition.sodiumMg ?? null,
+        nutrition.potassiumMg ?? null,
+        nutrition.calciumMg ?? null,
+        nutrition.ironMg ?? null,
+        nutrition.magnesiumMg ?? null,
+        nutrition.zincMg ?? null,
+        nutrition.vitaminAMcg ?? null,
+        nutrition.vitaminB6Mg ?? null,
+        nutrition.vitaminB12Mcg ?? null,
+        nutrition.vitaminCMg ?? null,
+        nutrition.vitaminDMcg ?? null,
+        nutrition.vitaminEMg ?? null,
+        nutrition.vitaminKMcg ?? null,
         nutrition.entryCount,
         nutrition.mealCount ?? null,
         nutrition.allNutrientsJson,
@@ -1919,12 +2105,37 @@ async function rebuildDailyMetrics(): Promise<void> {
       protein_g: number | null;
       carbs_g: number | null;
       fat_g: number | null;
+      saturated_fat_g: number | null;
+      monounsaturated_fat_g: number | null;
+      polyunsaturated_fat_g: number | null;
+      trans_fat_g: number | null;
       fiber_g: number | null;
       sugar_g: number | null;
+      cholesterol_mg: number | null;
+      caffeine_mg: number | null;
+      sodium_mg: number | null;
+      potassium_mg: number | null;
+      calcium_mg: number | null;
+      iron_mg: number | null;
+      magnesium_mg: number | null;
+      zinc_mg: number | null;
+      vitamin_a_mcg: number | null;
+      vitamin_b6_mg: number | null;
+      vitamin_b12_mcg: number | null;
+      vitamin_c_mg: number | null;
+      vitamin_d_mcg: number | null;
+      vitamin_e_mg: number | null;
+      vitamin_k_mcg: number | null;
       water_ml: number | null;
     }>(
       `
-        SELECT kcal_in, protein_g, carbs_g, fat_g, fiber_g, sugar_g, water_ml
+        SELECT
+          kcal_in, protein_g, carbs_g, fat_g, saturated_fat_g,
+          monounsaturated_fat_g, polyunsaturated_fat_g, trans_fat_g,
+          fiber_g, sugar_g, cholesterol_mg, caffeine_mg, sodium_mg,
+          potassium_mg, calcium_mg, iron_mg, magnesium_mg, zinc_mg,
+          vitamin_a_mcg, vitamin_b6_mg, vitamin_b12_mcg, vitamin_c_mg,
+          vitamin_d_mcg, vitamin_e_mg, vitamin_k_mcg, water_ml
         FROM nutrition_daily
         WHERE date = ?
       `,
@@ -1971,8 +2182,27 @@ async function rebuildDailyMetrics(): Promise<void> {
             proteinG: nutrition.protein_g ?? undefined,
             carbsG: nutrition.carbs_g ?? undefined,
             fatG: nutrition.fat_g ?? undefined,
+            saturatedFatG: nutrition.saturated_fat_g ?? undefined,
+            monounsaturatedFatG: nutrition.monounsaturated_fat_g ?? undefined,
+            polyunsaturatedFatG: nutrition.polyunsaturated_fat_g ?? undefined,
+            transFatG: nutrition.trans_fat_g ?? undefined,
             fiberG: nutrition.fiber_g ?? undefined,
             sugarG: nutrition.sugar_g ?? undefined,
+            cholesterolMg: nutrition.cholesterol_mg ?? undefined,
+            caffeineMg: nutrition.caffeine_mg ?? undefined,
+            sodiumMg: nutrition.sodium_mg ?? undefined,
+            potassiumMg: nutrition.potassium_mg ?? undefined,
+            calciumMg: nutrition.calcium_mg ?? undefined,
+            ironMg: nutrition.iron_mg ?? undefined,
+            magnesiumMg: nutrition.magnesium_mg ?? undefined,
+            zincMg: nutrition.zinc_mg ?? undefined,
+            vitaminAMcg: nutrition.vitamin_a_mcg ?? undefined,
+            vitaminB6Mg: nutrition.vitamin_b6_mg ?? undefined,
+            vitaminB12Mcg: nutrition.vitamin_b12_mcg ?? undefined,
+            vitaminCMg: nutrition.vitamin_c_mg ?? undefined,
+            vitaminDMcg: nutrition.vitamin_d_mcg ?? undefined,
+            vitaminEMg: nutrition.vitamin_e_mg ?? undefined,
+            vitaminKMcg: nutrition.vitamin_k_mcg ?? undefined,
             waterMl: nutrition.water_ml ?? undefined,
           }
         : null,
@@ -1994,10 +2224,15 @@ async function rebuildDailyMetrics(): Promise<void> {
           hrv_source_key, hrv_sample_count, workout_count, run_workout_count,
           ride_workout_count, strength_workout_count, activity_elapsed_seconds,
           activity_kcal, kcal_in, protein_g, carbs_g, fat_g, fiber_g, sugar_g,
+          saturated_fat_g, monounsaturated_fat_g, polyunsaturated_fat_g,
+          trans_fat_g, cholesterol_mg, caffeine_mg, sodium_mg, potassium_mg,
+          calcium_mg, iron_mg, magnesium_mg, zinc_mg, vitamin_a_mcg,
+          vitamin_b6_mg, vitamin_b12_mcg, vitamin_c_mg, vitamin_d_mcg,
+          vitamin_e_mg, vitamin_k_mcg,
           water_ml, weight_kg, body_fat_pct, lean_body_mass_kg, vo2max,
           generated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       daily.date,
       daily.dataCompleteness,
@@ -2038,6 +2273,25 @@ async function rebuildDailyMetrics(): Promise<void> {
       daily.fatG ?? null,
       daily.fiberG ?? null,
       daily.sugarG ?? null,
+      daily.saturatedFatG ?? null,
+      daily.monounsaturatedFatG ?? null,
+      daily.polyunsaturatedFatG ?? null,
+      daily.transFatG ?? null,
+      daily.cholesterolMg ?? null,
+      daily.caffeineMg ?? null,
+      daily.sodiumMg ?? null,
+      daily.potassiumMg ?? null,
+      daily.calciumMg ?? null,
+      daily.ironMg ?? null,
+      daily.magnesiumMg ?? null,
+      daily.zincMg ?? null,
+      daily.vitaminAMcg ?? null,
+      daily.vitaminB6Mg ?? null,
+      daily.vitaminB12Mcg ?? null,
+      daily.vitaminCMg ?? null,
+      daily.vitaminDMcg ?? null,
+      daily.vitaminEMg ?? null,
+      daily.vitaminKMcg ?? null,
       daily.waterMl ?? null,
       daily.weightKg ?? null,
       daily.bodyFatPct ?? null,

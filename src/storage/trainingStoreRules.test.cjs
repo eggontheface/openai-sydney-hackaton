@@ -114,6 +114,9 @@ test('rolls up a full fixture day without assigning sleep to its start date', ()
   assert.equal(wakeDay.hrvCanonicalType, 'hrv_rmssd');
   assert.equal(wakeDay.workoutCount, 1);
   assert.equal(wakeDay.kcalIn, 2210);
+  assert.equal(wakeDay.saturatedFatG, 18);
+  assert.equal(wakeDay.potassiumMg, 3400);
+  assert.equal(wakeDay.vitaminB12Mcg, 3.1);
 
   assert.equal(sleepStartDay.hasSleep, false);
   assert.equal(sleepStartDay.sleepSeconds, undefined);
