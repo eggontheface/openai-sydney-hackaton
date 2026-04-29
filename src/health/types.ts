@@ -23,6 +23,32 @@ export type HealthMetric = CanonicalType;
 
 export type SportBucket = 'run' | 'ride' | 'strength' | 'swim' | 'walk' | 'other';
 
+export type SourceFreshnessState = 'fresh' | 'stale' | 'missing' | 'partial';
+
+export type SourceFreshnessDomain =
+  | 'sleep'
+  | 'workouts'
+  | 'steps'
+  | 'energy'
+  | 'hrv'
+  | 'resting_hr'
+  | 'nutrition'
+  | 'body_composition'
+  | 'check_ins';
+
+export type SourceFreshness = {
+  domain: SourceFreshnessDomain;
+  label: string;
+  state: SourceFreshnessState;
+  canonicalTypes: CanonicalType[];
+  sampleCount: number;
+  dayCount: number;
+  latestLocalDate?: string;
+  lastUpdatedAt?: string;
+  ageDays?: number;
+  limitations: string[];
+};
+
 export type HealthSample = {
   sampleId: string;
   platform: HealthPlatform;
@@ -205,6 +231,7 @@ export type PipelineSnapshot = {
   nutritionDays: number;
   coverageDays: number;
   metricAvailability: MetricAvailability[];
+  sourceFreshness: SourceFreshness[];
   latestDiagnostics: HealthConnectReadDiagnostic[];
   today: DailyMetrics | null;
   history: DailyMetrics[];
