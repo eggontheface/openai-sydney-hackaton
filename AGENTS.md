@@ -32,6 +32,16 @@ You are collaborating with multiple developers and need to move fast. Favor smal
 - Preserve raw health data in the pipeline; dedupe or aggregate in derived views/tables unless explicitly changing storage semantics.
 - When adding pipeline fields, update types, SQLite persistence, exports, UI consumers, and diagnostics together.
 
+## Running and Preview Gotchas
+
+- `npm start -- -c` is for regular Expo preview. It can run in Expo Go, but Expo Go cannot load native modules such as `react-native-health-connect`.
+- `npm run web -- -c` is for fast UI/layout checks only. Web preview does not exercise Health Connect, HealthKit, SecureStore, native permissions, or device-only behavior.
+- Use `npm run start:dev-client -- --localhost -c` with a previously installed dev build when testing native device behavior over USB. Run `adb reverse tcp:8081 tcp:8081` first when the Android device cannot reach the Mac over LAN.
+- Build or reinstall the Android dev client with `npx expo run:android` when native dependencies, app config, permissions, or package names change. A JS reload is not enough for those changes.
+- If `npx expo run:android` cannot find Java or the Android SDK, set `JAVA_HOME`, `ANDROID_HOME`, and `ANDROID_SDK_ROOT` locally. `android/local.properties` may point at the local SDK path and must stay uncommitted.
+- OpenAI API keys from `.env` must use `EXPO_PUBLIC_OPENAI_API_KEY`. Restart Metro with `-c` after changing `.env`; otherwise the running bundle may still see the old environment.
+- If the app shows an Expo Go native-module error, rebuild/open the dev client app instead of Expo Go. The URL should use the app scheme dev-client route, not the generic Expo Go experience.
+
 ## Verification
 
 - Run `npm run typecheck` before merging TypeScript changes when time allows; at minimum run it before pushing to `main`.
