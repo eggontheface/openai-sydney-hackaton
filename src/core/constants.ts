@@ -18,6 +18,7 @@ export const ranges = [7, 30, 365];
 export const baselineRangeDays = 365;
 
 export const emptyAppSettings: AppSettings = {
+  athleteName: null,
   hasOpenAiApiKey: false,
   openAiApiKeySource: null,
   defaultSyncRangeDays: baselineRangeDays,

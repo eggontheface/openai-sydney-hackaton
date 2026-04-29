@@ -53,6 +53,7 @@ function coachGoalPhrase(goalText: string): string {
 }
 
 export function CoachScreen({
+  athleteName,
   coachBusy,
   coachDraft,
   coachMessages,
@@ -68,6 +69,7 @@ export function CoachScreen({
   onSync,
   onOpenWorkout,
 }: {
+  athleteName?: string | null;
   coachBusy: boolean;
   coachDraft: string;
   coachMessages: CoachConversationMessage[];
@@ -99,7 +101,7 @@ export function CoachScreen({
     : "—";
   const hrvLabel = hrvMetricLabel(current);
   const rhr = current?.restingHr ? `${Math.round(current.restingHr)} bpm` : "—";
-  const athleteName = "Martin";
+  const displayName = athleteName?.trim() || null;
   const goalPhrase = coachGoalPhrase(goalText);
   const wearableLabel =
     Platform.OS === "ios"
@@ -141,9 +143,12 @@ export function CoachScreen({
     snapshot.nutritionDays > 0 ||
     snapshot.coverageDays > 0;
   const loadingInitialMetrics = busy && !hasSyncedData;
-  const coachGreeting = hasSyncedData
-    ? `Good morning ${athleteName}. You are in a good spot to keep building toward ${goalPhrase}. I have checked the recovery picture and lined up today's work. If anything has changed since the data came in, tell me and I will adjust it.`
-    : `Good morning ${athleteName}. Let's keep building toward ${goalPhrase}. I do not have enough wearable history yet, so I will keep things sensible and adjust as you give me more context.`;
+  const coachHeroTitle = displayName
+    ? `Good morning, ${displayName}.`
+    : "Good morning.";
+  const coachHeroText = hasSyncedData
+    ? `You are in a good spot to keep building toward ${goalPhrase}. I have checked the recovery picture and lined up today's work. If anything has changed since the data came in, tell me and I will adjust it.`
+    : `Let's keep building toward ${goalPhrase}. I do not have enough wearable history yet, so I will keep things sensible and adjust as you give me more context.`;
   const feedRef = useRef<ScrollView | null>(null);
 
   function scrollFeedToEnd(animated = true) {
@@ -187,12 +192,8 @@ export function CoachScreen({
         <View style={styles.coachHero}>
           <View style={styles.coachHeroTop}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.coachHeroTitle}>
-                Good morning, {athleteName}.
-              </Text>
-              <Text style={styles.coachHeroText}>
-                {coachGreeting.replace(`Good morning ${athleteName}. `, "")}
-              </Text>
+              <Text style={styles.coachHeroTitle}>{coachHeroTitle}</Text>
+              <Text style={styles.coachHeroText}>{coachHeroText}</Text>
             </View>
             <View style={styles.coachHeroBadge}>
               <Text style={styles.coachHeroBadgeText}>

@@ -85,6 +85,7 @@ export default function App() {
   const [lastSuccessfulSync, setLastSuccessfulSync] = useState<LastSync>(null);
   const [recentSyncRuns, setRecentSyncRuns] = useState<SyncRuns>([]);
   const [appSettings, setAppSettings] = useState<AppSettings>(emptyAppSettings);
+  const [athleteNameDraft, setAthleteNameDraft] = useState("");
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [coachDraft, setCoachDraft] = useState("");
   const [coachMessages, setCoachMessages] = useState<
@@ -147,6 +148,7 @@ export default function App() {
       .then(async () => {
         const nextSettings = await loadAppSettings();
         setAppSettings(nextSettings);
+        setAthleteNameDraft(nextSettings.athleteName ?? "");
         setRangeDays(nextSettings.defaultSyncRangeDays);
         refreshStoreInBackground();
       })
@@ -200,6 +202,26 @@ export default function App() {
       setAppSettings(nextSettings);
       setApiKeyDraft("");
       setStatus("OpenAI API key cleared");
+    } catch (error) {
+      setStatus(String(error instanceof Error ? error.message : error));
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+
+  async function saveAthleteName() {
+    setSettingsBusy(true);
+    try {
+      const nextSettings = await saveAppSettings({
+        athleteName: athleteNameDraft,
+      });
+      setAppSettings(nextSettings);
+      setAthleteNameDraft(nextSettings.athleteName ?? "");
+      setStatus(
+        nextSettings.athleteName
+          ? "Preferred name saved locally"
+          : "Preferred name cleared",
+      );
     } catch (error) {
       setStatus(String(error instanceof Error ? error.message : error));
     } finally {
@@ -562,6 +584,7 @@ export default function App() {
         ) : null}
         {entryMode === "onboarding" ? (
           <CoachOnboardingScreen
+            athleteName={appSettings.athleteName}
             busy={busy}
             canSync={canSync}
             onDiscussGoal={discussOnboardingGoal}
@@ -582,6 +605,7 @@ export default function App() {
         ) : null}
         {entryMode === "app" && activeTab === "coach" ? (
           <CoachScreen
+            athleteName={appSettings.athleteName}
             busy={busy}
             coachBusy={coachBusy}
             coachDraft={coachDraft}
@@ -608,6 +632,7 @@ export default function App() {
           <SourceScreen
             apiKeyDraft={apiKeyDraft}
             appSettings={appSettings}
+            athleteNameDraft={athleteNameDraft}
             busy={busy}
             lastSync={lastSync}
             lastSuccessfulSync={lastSuccessfulSync}
@@ -616,11 +641,13 @@ export default function App() {
             onExport={runExport}
             onIncrementalSync={() => void runSync("incremental")}
             onSaveApiKey={saveApiKey}
+            onSaveAthleteName={saveAthleteName}
             onSetDefaultRange={setDefaultSyncRange}
             onSync={runSync}
             rangeDays={rangeDays}
             recentSyncRuns={recentSyncRuns}
             setApiKeyDraft={setApiKeyDraft}
+            setAthleteNameDraft={setAthleteNameDraft}
             setRangeDays={setRangeDays}
             settingsBusy={settingsBusy}
             snapshot={snapshot}
