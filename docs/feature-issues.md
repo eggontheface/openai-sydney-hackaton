@@ -182,6 +182,7 @@ or severe fatigue force safer guidance.
 **Scope:**
 
 - Create a risk flag model and helper functions.
+- Extend the `risk_flags` schema introduced by issue 25 with the actual flag catalog and extraction helpers.
 - Collect risk flags from onboarding, daily check-ins, and typed adjustments.
 - Add a conservative override layer before recommendations are shown.
 - Surface professional-care guidance for serious symptoms without diagnosing.
