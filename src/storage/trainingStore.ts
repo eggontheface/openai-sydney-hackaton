@@ -4,6 +4,11 @@ import * as SQLite from "expo-sqlite";
 
 import { extractRiskFlagsFromCoachRequest } from "../coach/riskFlags";
 import {
+  buildTrainingLoadSnapshot,
+  recommendationBoundaryForTrainingLoad,
+  toTrainingLoadExport,
+} from "../coach/trainingLoad";
+import {
   normalizeGoalProfile,
   type CoachingStyle,
   type ExperienceLevel,
@@ -37,6 +42,7 @@ import type {
   SleepSessionRecord,
   SourceFreshness,
   SourceFreshnessDomain,
+  TrainingLoadSnapshot,
   SportBucket,
   SyncPayload,
   SyncRange,
@@ -2547,10 +2553,17 @@ function sourceFreshnessPenalty(gaps: SourceFreshness[]): number {
   return gaps.length ? 3 : 0;
 }
 
+function buildCurrentTrainingLoadSnapshot(
+  genericPlatformWorkoutCount = 0,
+): TrainingLoadSnapshot {
+  return buildTrainingLoadSnapshot({ genericPlatformWorkoutCount });
+}
+
 function deriveRecommendation(
   current: DailyMetrics | null,
   history: DailyMetrics[],
   sourceFreshness: SourceFreshness[] = [],
+  trainingLoad: TrainingLoadSnapshot = buildCurrentTrainingLoadSnapshot(),
 ): CoachRecommendation {
   if (!current || current.sourceCount === 0) {
     return {
@@ -2588,6 +2601,7 @@ function deriveRecommendation(
   let readiness = 56;
   const signals: string[] = [];
   const freshnessGaps = recommendationFreshnessGaps(sourceFreshness);
+  const trainingLoadBoundary = recommendationBoundaryForTrainingLoad(trainingLoad);
 
   if (current.sleepSeconds != null) {
     if (sleepHours >= 7.5) {
@@ -2656,6 +2670,10 @@ function deriveRecommendation(
     );
     readiness -= sourceFreshnessPenalty(freshnessGaps);
     signals.push(`${labels.join(" and ")}, so this call is conservative`);
+  }
+
+  if (!trainingLoadBoundary.canUseTrainingLoad) {
+    signals.push(trainingLoadBoundary.recommendationNote);
   }
 
   readiness = Math.max(20, Math.min(96, Math.round(readiness)));
@@ -2760,6 +2778,7 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
       history.find((row) => row.date === todayKey) ?? history[0] ?? null;
     const recentWorkouts = await getRecentWorkoutsFromDb(db, 5);
     const recentSamples = await getRecentSamplesFromDb(db, 12);
+    const trainingLoad = buildCurrentTrainingLoadSnapshot(dedupedWorkoutCount);
 
     return {
       totalSamples: Number(countRow?.total ?? 0),
@@ -2819,7 +2838,8 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
         metadataJson: row.metadata_json,
         sourceModifiedAt: row.source_modified_at ?? undefined,
       })),
-      recommendation: deriveRecommendation(today, history, sourceFreshness),
+      trainingLoad,
+      recommendation: deriveRecommendation(today, history, sourceFreshness, trainingLoad),
     };
   });
 }
@@ -3109,6 +3129,9 @@ export async function exportPipelineJson(): Promise<string> {
       goal_profile: goalProfile ?? undefined,
     });
 
+    const trainingLoad = buildCurrentTrainingLoadSnapshot(
+      dedupeWorkoutRows(workouts).length,
+    );
     const payload = {
       schema: "biostream_training_pipeline.v5",
       exportedAt,
@@ -3122,6 +3145,7 @@ export async function exportPipelineJson(): Promise<string> {
       diagnostics,
       goalProfile,
       riskFlags,
+      trainingLoad: toTrainingLoadExport(trainingLoad),
     };
 
     const directory = FileSystem.documentDirectory;

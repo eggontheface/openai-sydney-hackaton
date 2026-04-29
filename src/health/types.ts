@@ -256,6 +256,34 @@ export type DailyMetrics = {
   generatedAt: string;
 };
 
+export type TrainingLoadStatus = 'unavailable' | 'source-provided' | 'derived' | 'stale';
+
+export type TrainingLoadSourceKind = 'intervals_icu' | 'documented_local_model' | 'vendor';
+
+export type TrainingLoadDailyLoadUnit = 'intervals_icu_load' | 'tss' | 'trimp' | 'unknown';
+
+export type TrainingLoadIntervalsFields = {
+  ctl?: number;
+  atl?: number;
+  tsb?: number;
+  rampRate7d?: number;
+  dailyLoad?: number;
+  dailyLoadUnit?: TrainingLoadDailyLoadUnit;
+};
+
+export type TrainingLoadSnapshot = {
+  trainingLoadStatus: TrainingLoadStatus;
+  label: string;
+  summary: string;
+  sourceKind?: TrainingLoadSourceKind;
+  sourceName?: string;
+  method?: string;
+  asOf?: string;
+  staleAfterDays?: number;
+  intervals?: TrainingLoadIntervalsFields;
+  limitations: string[];
+};
+
 export type CoachTone = 'positive' | 'warm' | 'cool' | 'neutral';
 
 export type CoachRecommendation = {
@@ -290,5 +318,6 @@ export type PipelineSnapshot = {
   history: DailyMetrics[];
   recentWorkouts: WorkoutRecord[];
   recentSamples: HealthSample[];
+  trainingLoad: TrainingLoadSnapshot;
   recommendation: CoachRecommendation;
 };

@@ -10,6 +10,7 @@ import type {
   SyncRange,
 } from '../health/types';
 import { emptySnapshot } from '../core/constants';
+import { buildTrainingLoadSnapshot } from '../coach/trainingLoad';
 import {
   normalizeGoalProfile,
   type GoalProfile,
@@ -363,13 +364,15 @@ const demoSnapshot: PipelineSnapshot = {
     },
   ],
   recentSamples: [],
+  trainingLoad: buildTrainingLoadSnapshot(),
   recommendation: {
     readiness: 78,
     readinessLabel: 'Primed',
     color: 'positive',
     title: 'Aerobic base',
     detail: '40 min easy run, stay conversational',
-    reason: 'Sleep is solid, RMSSD HRV is above its matching baseline, and recent training load is consistent.',
+    reason:
+      'Sleep is solid, RMSSD HRV is above its matching baseline, and training load is unavailable, so this uses workout history conservatively.',
     opener: 'Morning. Your wearable data already shows a strong recovery profile today.',
     strain: 9.5,
     strainTarget: '8-11',

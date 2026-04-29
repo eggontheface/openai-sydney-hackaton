@@ -557,6 +557,7 @@ export function SourceScreen({
         <View style={styles.privacyCard}>
           <Lock color={tokens.muted} size={16} strokeWidth={2} />
           <Text style={styles.privacyText}>
+            {snapshot.trainingLoad.summary}{' '}
             Vendor-only metrics such as stress, body battery, sleep score, and
             training load are preserved only when a source writes them. They are not
             fabricated from generic platform data.
