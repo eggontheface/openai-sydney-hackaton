@@ -1,7 +1,5 @@
 import { Platform } from 'react-native';
 
-import { syncAppleHealth } from './appleHealth';
-import { syncHealthConnect } from './healthConnect';
 import type { HealthProvider, SyncRange, SyncResult } from './types';
 
 export function currentHealthProviderId(): HealthProvider | undefined {
@@ -30,12 +28,23 @@ export function currentHealthProviderLabel(): string {
 
 export async function syncCurrentPlatform(range: SyncRange): Promise<SyncResult> {
   if (Platform.OS === 'ios') {
+    const { syncAppleHealth } = await import('./appleHealth');
     return syncAppleHealth(range);
   }
 
   if (Platform.OS === 'android') {
+    const { syncHealthConnect } = await import('./healthConnect');
     return syncHealthConnect(range);
   }
 
   throw new Error('Health data import is only available on iOS and Android dev builds.');
+}
+
+export async function openCurrentPlatformHealthSettings(): Promise<void> {
+  if (Platform.OS === 'android') {
+    const { openAndroidHealthSettings } = await import('./healthConnect');
+    return openAndroidHealthSettings();
+  }
+
+  throw new Error('Health settings are only available on Android dev builds.');
 }

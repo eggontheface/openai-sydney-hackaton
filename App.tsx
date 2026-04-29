@@ -45,10 +45,10 @@ import {
   type PlannedWorkout,
   type TrainingPlan,
 } from './src/coach/planEngine';
-import { openAndroidHealthSettings } from './src/health/healthConnect';
 import {
   currentHealthProviderId,
   currentHealthProviderLabel,
+  openCurrentPlatformHealthSettings,
   syncCurrentPlatform,
 } from './src/health/syncPipeline';
 import type {
@@ -1593,7 +1593,9 @@ function SourceScreen({
               disabled={busy}
               icon={Settings}
               label="Permissions"
-              onPress={() => void openAndroidHealthSettings()}
+              onPress={() => void openCurrentPlatformHealthSettings().catch((error) => {
+                Alert.alert('Health settings', String(error instanceof Error ? error.message : error));
+              })}
             />
           ) : null}
           <AppButton
