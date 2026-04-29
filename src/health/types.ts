@@ -1,23 +1,103 @@
-export type HealthProvider = 'apple_health' | 'health_connect';
+export type HealthPlatform = 'health_connect' | 'healthkit';
 
-export type HealthMetric =
+export type HealthProvider = HealthPlatform;
+
+export type CanonicalType =
   | 'steps'
   | 'active_energy'
+  | 'total_energy'
   | 'distance'
   | 'heart_rate'
-  | 'workout';
+  | 'resting_heart_rate'
+  | 'hrv_rmssd'
+  | 'sleep_session'
+  | 'workout'
+  | 'weight'
+  | 'body_fat'
+  | 'lean_body_mass'
+  | 'nutrition'
+  | 'hydration'
+  | 'vo2max';
 
-export type NormalizedHealthSample = {
-  id: string;
-  provider: HealthProvider;
-  metric: HealthMetric;
-  startTime: string;
-  endTime: string;
-  value: number;
-  unit: string;
-  sourceName?: string;
-  sourceId?: string;
+export type HealthMetric = CanonicalType;
+
+export type SportBucket = 'run' | 'ride' | 'strength' | 'swim' | 'walk' | 'other';
+
+export type HealthSample = {
+  sampleId: string;
+  platform: HealthPlatform;
+  recordType: string;
+  canonicalType: CanonicalType;
+  sourceApp?: string;
+  sourceDevice?: string;
+  startAt: string;
+  endAt: string;
+  localDate: string;
+  timezone?: string;
+  value?: number;
+  unit?: string;
+  metadataJson: string;
+  sourceModifiedAt?: string;
+};
+
+export type WorkoutRecord = {
+  workoutId: string;
+  platform: HealthPlatform;
+  sourceApp?: string;
+  startAt: string;
+  endAt: string;
+  localDate: string;
+  name?: string;
+  activityType?: string;
+  sportBucket: SportBucket;
+  elapsedSeconds: number;
+  movingSeconds?: number;
+  distanceKm?: number;
+  activeKcal?: number;
+  totalKcal?: number;
+  avgHrBpm?: number;
+  maxHrBpm?: number;
+  routeAvailable?: boolean;
+  lapsJson?: string;
+  streamsJson?: string;
   rawJson: string;
+};
+
+export type SleepSessionRecord = {
+  sleepId: string;
+  platform: HealthPlatform;
+  sourceApp?: string;
+  startAt: string;
+  endAt: string;
+  wakeDate: string;
+  sleepSeconds: number;
+  timeInBedSeconds: number;
+  deepSleepSeconds?: number;
+  lightSleepSeconds?: number;
+  remSleepSeconds?: number;
+  awakeSeconds?: number;
+  sleepStageJson?: string;
+  sleepEfficiency?: number;
+  wakeupCount?: number;
+  rawJson: string;
+};
+
+export type NutritionDailyRecord = {
+  date: string;
+  kcalIn?: number;
+  proteinG?: number;
+  carbsG?: number;
+  fatG?: number;
+  fiberG?: number;
+  sugarG?: number;
+  cholesterolMg?: number;
+  waterMl?: number;
+  caffeineMg?: number;
+  sodiumMg?: number;
+  entryCount: number;
+  mealCount?: number;
+  allNutrientsJson: string;
+  sourceModifiedAt?: string;
 };
 
 export type SyncRange = {
@@ -25,21 +105,89 @@ export type SyncRange = {
   endDate: Date;
 };
 
-export type SyncResult = {
+export type SyncPayload = {
   provider: HealthProvider;
-  samples: NormalizedHealthSample[];
+  samples: HealthSample[];
+  workouts: WorkoutRecord[];
+  sleepSessions: SleepSessionRecord[];
+  nutritionDaily: NutritionDailyRecord[];
   warnings: string[];
 };
 
+export type SyncResult = SyncPayload;
+
 export type MetricSummary = {
-  metric: HealthMetric;
+  metric: CanonicalType;
   value: number;
   unit: string;
   samples: number;
 };
 
+export type DailyMetrics = {
+  date: string;
+  dataCompleteness: 'empty' | 'partial' | 'full';
+  wellnessDataStatus: string;
+  sourceCount: number;
+  hasPlatformWellness: boolean;
+  hasActivity: boolean;
+  hasNutrition: boolean;
+  hasSleep: boolean;
+  hasSteps: boolean;
+  hasEnergy: boolean;
+  steps?: number;
+  activeKcal?: number;
+  totalKcal?: number;
+  distanceKm?: number;
+  sleepSeconds?: number;
+  timeInBedSeconds?: number;
+  sleepEfficiency?: number;
+  restingHr?: number;
+  heartRateAvgBpm?: number;
+  heartRateMinBpm?: number;
+  heartRateMaxBpm?: number;
+  hrvLastNightAvg?: number;
+  workoutCount?: number;
+  runWorkoutCount?: number;
+  rideWorkoutCount?: number;
+  strengthWorkoutCount?: number;
+  activityElapsedSeconds?: number;
+  activityKcal?: number;
+  kcalIn?: number;
+  proteinG?: number;
+  carbsG?: number;
+  fatG?: number;
+  fiberG?: number;
+  sugarG?: number;
+  waterMl?: number;
+  weightKg?: number;
+  bodyFatPct?: number;
+  leanBodyMassKg?: number;
+  vo2max?: number;
+  generatedAt: string;
+};
+
+export type CoachTone = 'positive' | 'warm' | 'cool' | 'neutral';
+
+export type CoachRecommendation = {
+  readiness: number | null;
+  readinessLabel: string;
+  color: CoachTone;
+  title: string;
+  detail: string;
+  reason: string;
+  opener: string;
+  strain: number;
+  strainTarget: string;
+};
+
 export type PipelineSnapshot = {
   totalSamples: number;
-  today: MetricSummary[];
-  trailing7Days: MetricSummary[];
+  workoutCount: number;
+  sleepCount: number;
+  nutritionDays: number;
+  today: DailyMetrics | null;
+  history: DailyMetrics[];
+  recentWorkouts: WorkoutRecord[];
+  recentSamples: HealthSample[];
+  recommendation: CoachRecommendation;
 };

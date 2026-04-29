@@ -6,10 +6,11 @@ import {
 } from '@kingstinct/react-native-healthkit';
 import type { QuantityTypeIdentifier } from '@kingstinct/react-native-healthkit';
 
+import { localDateKey } from '../lib/dates';
 import { safeJsonStringify } from '../lib/json';
 import type {
   HealthMetric,
-  NormalizedHealthSample,
+  HealthSample,
   SyncRange,
   SyncResult,
 } from './types';
@@ -71,7 +72,7 @@ export async function syncAppleHealth(range: SyncRange): Promise<SyncResult> {
     ],
   });
 
-  const samples: NormalizedHealthSample[] = [];
+  const samples: HealthSample[] = [];
   const warnings: string[] = [];
 
   for (const config of quantityConfigs) {
@@ -90,16 +91,18 @@ export async function syncAppleHealth(range: SyncRange): Promise<SyncResult> {
 
       for (const record of records) {
         samples.push({
-          id: `apple_health:${config.metric}:${record.uuid}`,
-          provider: 'apple_health',
-          metric: config.metric,
-          startTime: iso(record.startDate),
-          endTime: iso(record.endDate),
+          sampleId: `healthkit:${config.metric}:${record.uuid}`,
+          platform: 'healthkit',
+          recordType: config.identifier,
+          canonicalType: config.metric,
+          sourceApp: sourceId(record) ?? sourceName(record),
+          sourceDevice: sourceName(record),
+          startAt: iso(record.startDate),
+          endAt: iso(record.endDate),
+          localDate: localDateKey(record.startDate),
           value: Number(record.quantity),
           unit: record.unit ?? config.unit,
-          sourceName: sourceName(record),
-          sourceId: sourceId(record),
-          rawJson: safeJsonStringify(record),
+          metadataJson: safeJsonStringify(record),
         });
       }
     } catch (error) {
@@ -127,16 +130,18 @@ export async function syncAppleHealth(range: SyncRange): Promise<SyncResult> {
           60000;
 
       samples.push({
-        id: `apple_health:workout:${workout.uuid}`,
-        provider: 'apple_health',
-        metric: 'workout',
-        startTime: iso(workout.startDate),
-        endTime: iso(workout.endDate),
+        sampleId: `healthkit:workout:${workout.uuid}`,
+        platform: 'healthkit',
+        recordType: 'HKWorkoutTypeIdentifier',
+        canonicalType: 'workout',
+        startAt: iso(workout.startDate),
+        endAt: iso(workout.endDate),
+        localDate: localDateKey(workout.startDate),
         value: Number.isFinite(durationMinutes) ? durationMinutes : 0,
         unit: 'min',
-        sourceName: sourceName(workout),
-        sourceId: sourceId(workout),
-        rawJson: safeJsonStringify(raw),
+        sourceApp: sourceId(workout) ?? sourceName(workout),
+        sourceDevice: sourceName(workout),
+        metadataJson: safeJsonStringify(raw),
       });
     }
   } catch (error) {
@@ -144,8 +149,11 @@ export async function syncAppleHealth(range: SyncRange): Promise<SyncResult> {
   }
 
   return {
-    provider: 'apple_health',
+    provider: 'healthkit',
     samples,
+    workouts: [],
+    sleepSessions: [],
+    nutritionDaily: [],
     warnings,
   };
 }

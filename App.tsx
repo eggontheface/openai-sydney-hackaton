@@ -1,4 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -10,17 +11,31 @@ import {
   Text,
   View,
 } from 'react-native';
+import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import {
+  Activity,
+  ArrowRight,
+  ChartColumn,
+  Check,
   Database,
   Download,
+  Dumbbell,
   HeartPulse,
+  History,
+  Lock,
+  Mic,
+  Moon,
+  MoreHorizontal,
   RefreshCw,
+  Route,
   Settings,
-  ShieldCheck,
+  Shield,
+  Sparkles,
   Trash2,
+  User,
+  Zap,
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
-import { useEffect, useMemo, useState } from 'react';
 
 import { openAndroidHealthSettings } from './src/health/healthConnect';
 import {
@@ -29,68 +44,131 @@ import {
   syncCurrentPlatform,
 } from './src/health/syncPipeline';
 import type {
-  HealthMetric,
-  MetricSummary,
+  CanonicalType,
+  DailyMetrics,
   PipelineSnapshot,
+  WorkoutRecord,
 } from './src/health/types';
-import { formatRange, formatShortDateTime, makeSyncRange } from './src/lib/dates';
+import {
+  formatDisplayDate,
+  formatDuration,
+  formatRange,
+  formatShortDateTime,
+  makeSyncRange,
+} from './src/lib/dates';
 import {
   clearPipeline,
   exportPipelineJson,
   getLastSyncRun,
   getPipelineSnapshot,
-  getRecentSamples,
   initTrainingStore,
   recordSyncRun,
-  upsertSamples,
+  upsertSyncPayload,
 } from './src/storage/trainingStore';
 
-const ranges = [1, 7, 30];
+const ranges = [7, 30];
 
-const metricOrder: HealthMetric[] = [
-  'steps',
-  'active_energy',
-  'distance',
-  'heart_rate',
-  'workout',
-];
+const tokens = {
+  bg: '#eef2ee',
+  bgDeep: '#dde6dd',
+  surface: '#ffffff',
+  surfaceAlt: '#f5f8f4',
+  ink: '#0d1f1a',
+  inkSoft: '#274432',
+  muted: '#5a8071',
+  line: '#cfdcd1',
+  lineSoft: '#e0eae0',
+  accent: '#1f5a3d',
+  accentDeep: '#0d3a23',
+  accentSoft: '#cfe5d6',
+  positive: '#3f8f5a',
+  warm: '#d8a95e',
+  cool: '#4a7a90',
+  danger: '#b42318',
+};
 
-const metricLabels: Record<HealthMetric, string> = {
-  steps: 'Steps',
-  active_energy: 'Active kcal',
-  distance: 'Distance',
-  heart_rate: 'Avg HR',
-  workout: 'Training',
+const emptySnapshot: PipelineSnapshot = {
+  totalSamples: 0,
+  workoutCount: 0,
+  sleepCount: 0,
+  nutritionDays: 0,
+  today: null,
+  history: [],
+  recentWorkouts: [],
+  recentSamples: [],
+  recommendation: {
+    readiness: null,
+    readinessLabel: 'Connect',
+    color: 'neutral',
+    title: 'Sync Health Connect',
+    detail: 'Import data to build a baseline.',
+    reason: 'No platform data is available yet.',
+    opener: 'Connect Health Connect and run a sync.',
+    strain: 0,
+    strainTarget: '—',
+  },
 };
 
 type LastSync = Awaited<ReturnType<typeof getLastSyncRun>>;
-type RecentSample = Awaited<ReturnType<typeof getRecentSamples>>[number];
+type Tab = 'coach' | 'history' | 'you';
 
-function findMetric(rows: MetricSummary[], metric: HealthMetric): MetricSummary | undefined {
-  return rows.find((row) => row.metric === metric);
+function toneColor(tone: PipelineSnapshot['recommendation']['color']) {
+  if (tone === 'positive') return tokens.positive;
+  if (tone === 'warm') return tokens.warm;
+  if (tone === 'cool') return tokens.cool;
+  return tokens.accent;
 }
 
-function formatMetric(row: MetricSummary | undefined, metric: HealthMetric): string {
-  if (!row) {
-    return metric === 'distance' ? '0.0 km' : '0';
+function formatNumber(value?: number, digits = 0): string {
+  if (value == null || Number.isNaN(value)) {
+    return '—';
   }
 
-  if (metric === 'distance') {
-    return `${(row.value / 1000).toFixed(1)} km`;
-  }
-
-  if (metric === 'heart_rate') {
-    return `${Math.round(row.value)} bpm`;
-  }
-
-  if (metric === 'workout') {
-    return `${Math.round(row.value)} min`;
-  }
-
-  return `${Math.round(row.value).toLocaleString()}`;
+  return value.toLocaleString(undefined, {
+    maximumFractionDigits: digits,
+    minimumFractionDigits: digits,
+  });
 }
 
-function Button({
+function formatDateKey(date?: string): string {
+  if (!date) {
+    return formatDisplayDate(new Date());
+  }
+
+  return formatDisplayDate(`${date}T12:00:00`);
+}
+
+function metricLabel(type: CanonicalType): string {
+  const labels: Partial<Record<CanonicalType, string>> = {
+    active_energy: 'Active kcal',
+    body_fat: 'Body fat',
+    distance: 'Distance',
+    heart_rate: 'Heart rate',
+    hydration: 'Hydration',
+    hrv_rmssd: 'HRV',
+    lean_body_mass: 'Lean mass',
+    nutrition: 'Nutrition',
+    resting_heart_rate: 'Resting HR',
+    sleep_session: 'Sleep',
+    steps: 'Steps',
+    total_energy: 'Total kcal',
+    vo2max: 'VO2 max',
+    weight: 'Weight',
+    workout: 'Workout',
+  };
+
+  return labels[type] ?? type.replace(/_/g, ' ');
+}
+
+function dataAge(lastSync: LastSync): string {
+  if (!lastSync) {
+    return 'Never synced';
+  }
+
+  return `Last sync ${formatShortDateTime(lastSync.ended_at)}`;
+}
+
+function AppButton({
   label,
   icon: Icon,
   onPress,
@@ -103,6 +181,9 @@ function Button({
   disabled?: boolean;
   variant?: 'primary' | 'secondary' | 'danger';
 }) {
+  const primary = variant === 'primary';
+  const danger = variant === 'danger';
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -110,22 +191,22 @@ function Button({
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
-        variant === 'primary' && styles.primaryButton,
-        variant === 'danger' && styles.dangerButton,
-        disabled && styles.disabledButton,
-        pressed && !disabled && styles.pressedButton,
+        primary && styles.buttonPrimary,
+        danger && styles.buttonDanger,
+        disabled && styles.disabled,
+        pressed && !disabled && styles.pressed,
       ]}
     >
       <Icon
-        color={variant === 'primary' ? '#ffffff' : variant === 'danger' ? '#b42318' : '#24535d'}
-        size={18}
-        strokeWidth={2.2}
+        color={primary ? tokens.surface : danger ? tokens.danger : tokens.ink}
+        size={17}
+        strokeWidth={2}
       />
       <Text
         style={[
           styles.buttonText,
-          variant === 'primary' && styles.primaryButtonText,
-          variant === 'danger' && styles.dangerButtonText,
+          primary && styles.buttonPrimaryText,
+          danger && styles.buttonDangerText,
         ]}
       >
         {label}
@@ -134,82 +215,623 @@ function Button({
   );
 }
 
-function MetricCard({
-  label,
-  today,
-  week,
-  samples,
-}: {
-  label: string;
-  today: string;
-  week: string;
-  samples: number;
-}) {
+function SectionLabel({ children }: { children: string }) {
+  return <Text style={styles.sectionLabel}>{children}</Text>;
+}
+
+function CoachAvatar({ size = 34 }: { size?: number }) {
   return (
-    <View style={styles.metricCard}>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={styles.metricValue}>{today}</Text>
-      <Text style={styles.metricSubvalue}>{week} / 7d</Text>
-      <Text style={styles.metricMeta}>{samples} samples</Text>
+    <View
+      style={[
+        styles.coachAvatar,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+        },
+      ]}
+    >
+      <Sparkles color={tokens.surface} size={size * 0.48} strokeWidth={2} />
     </View>
   );
 }
 
-function RecentSampleRow({ sample }: { sample: RecentSample }) {
+function Ring({
+  value,
+  color,
+  size = 78,
+  stroke = 7,
+}: {
+  value: number | null;
+  color: string;
+  size?: number;
+  stroke?: number;
+}) {
+  const safeValue = value ?? 0;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (safeValue / 100) * circumference;
+
   return (
-    <View style={styles.sampleRow}>
-      <View style={styles.sampleDot} />
-      <View style={styles.sampleContent}>
-        <Text style={styles.sampleTitle}>
-          {metricLabels[sample.metric]} · {sample.provider.replace('_', ' ')}
-        </Text>
-        <Text style={styles.sampleMeta}>
-          {formatShortDateTime(sample.start_time)} · {Number(sample.value).toFixed(1)}{' '}
-          {sample.unit}
-        </Text>
+    <View style={{ width: size, height: size }}>
+      <Svg height={size} width={size}>
+        <Circle
+          cx={size / 2}
+          cy={size / 2}
+          fill="none"
+          r={radius}
+          stroke={tokens.line}
+          strokeWidth={stroke}
+        />
+        <Circle
+          cx={size / 2}
+          cy={size / 2}
+          fill="none"
+          r={radius}
+          stroke={color}
+          strokeDasharray={`${circumference} ${circumference}`}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          strokeWidth={stroke}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </Svg>
+      <View style={StyleSheet.absoluteFillObject}>
+        <View style={styles.ringCenter}>
+          <Text style={styles.ringValue}>{value == null ? '—' : value}</Text>
+        </View>
       </View>
     </View>
   );
 }
 
-export default function App() {
-  const [rangeDays, setRangeDays] = useState(7);
-  const [snapshot, setSnapshot] = useState<PipelineSnapshot>({
-    totalSamples: 0,
-    today: [],
-    trailing7Days: [],
+function Sparkline({ data, color }: { data: number[]; color: string }) {
+  const width = 150;
+  const height = 44;
+  const max = Math.max(...data, 1);
+  const min = Math.min(...data, 0);
+  const range = max - min || 1;
+  const points = data.map((value, index) => {
+    const x = (index / Math.max(1, data.length - 1)) * width;
+    const y = height - ((value - min) / range) * (height - 8) - 4;
+    return [x, y];
   });
+  const path = points
+    .map(([x, y], index) => `${index === 0 ? 'M' : 'L'}${x},${y}`)
+    .join(' ');
+
+  return (
+    <Svg height={height} width="100%" viewBox={`0 0 ${width} ${height}`}>
+      <Path d={path} fill="none" stroke={color} strokeLinecap="round" strokeWidth={2} />
+    </Svg>
+  );
+}
+
+function CoachLine({ children, first }: { children: string; first?: boolean }) {
+  return (
+    <View style={[styles.coachLine, first && styles.coachLineFirst]}>
+      <CoachAvatar size={28} />
+      <View style={styles.coachBubble}>
+        <Text style={styles.coachText}>{children}</Text>
+      </View>
+    </View>
+  );
+}
+
+function UserBubble({ children }: { children: string }) {
+  return (
+    <View style={styles.userBubble}>
+      <Text style={styles.userText}>{children}</Text>
+    </View>
+  );
+}
+
+function DataCard({
+  label,
+  children,
+  accent,
+}: {
+  label: string;
+  children: React.ReactNode;
+  accent?: string;
+}) {
+  return (
+    <View style={styles.dataCard}>
+      <View style={styles.dataCardHeader}>
+        <View style={[styles.dataCardAccent, { backgroundColor: accent ?? tokens.accent }]} />
+        <SectionLabel>{label}</SectionLabel>
+      </View>
+      {children}
+    </View>
+  );
+}
+
+function SmallMetric({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+}) {
+  return (
+    <View style={styles.smallMetric}>
+      <Text style={styles.smallMetricLabel}>{label}</Text>
+      <Text style={styles.smallMetricValue}>{value}</Text>
+      {sub ? <Text style={styles.smallMetricSub}>{sub}</Text> : null}
+    </View>
+  );
+}
+
+function CoachScreen({
+  snapshot,
+  lastSync,
+  busy,
+  status,
+  warnings,
+  onSync,
+}: {
+  snapshot: PipelineSnapshot;
+  lastSync: LastSync;
+  busy: boolean;
+  status: string;
+  warnings: string[];
+  onSync: () => void;
+}) {
+  const current = snapshot.today;
+  const recommendation = snapshot.recommendation;
+  const accent = toneColor(recommendation.color);
+  const sleep = current?.sleepSeconds ? formatDuration(current.sleepSeconds) : '—';
+  const hrv = current?.hrvLastNightAvg ? `${Math.round(current.hrvLastNightAvg)} ms` : '—';
+  const rhr = current?.restingHr ? `${Math.round(current.restingHr)} bpm` : '—';
+  const sparkData = snapshot.history
+    .slice()
+    .reverse()
+    .map((row) => row.hrvLastNightAvg ?? row.restingHr ?? row.steps ?? 0)
+    .slice(-10);
+
+  return (
+    <View style={styles.screen}>
+      <View style={styles.topBar}>
+        <View style={styles.topBarLeft}>
+          <CoachAvatar size={32} />
+          <View>
+            <Text style={styles.topTitle}>Coach</Text>
+            <Text style={styles.topMeta}>
+              {formatDateKey(current?.date)} · {dataAge(lastSync)}
+            </Text>
+          </View>
+        </View>
+        <MoreHorizontal color={tokens.muted} size={22} strokeWidth={2} />
+      </View>
+
+      <ScrollView contentContainerStyle={styles.feed} showsVerticalScrollIndicator={false}>
+        <Text style={styles.dateDivider}>This morning</Text>
+        <CoachLine first>{recommendation.opener}</CoachLine>
+
+        <DataCard accent={accent} label="Last night">
+          <View style={styles.recoveryRow}>
+            <Ring color={accent} value={recommendation.readiness} />
+            <View style={styles.recoveryCopy}>
+              <View style={styles.readinessLine}>
+                <Text style={styles.readinessLabel}>{recommendation.readinessLabel}</Text>
+                <Text style={styles.readinessMeta}>readiness</Text>
+              </View>
+              <View style={styles.metricGrid}>
+                <SmallMetric label="HRV" value={hrv} />
+                <SmallMetric label="RHR" value={rhr} />
+                <SmallMetric label="Sleep" value={sleep} />
+                <SmallMetric
+                  label="Steps"
+                  value={formatNumber(current?.steps)}
+                />
+              </View>
+            </View>
+          </View>
+        </DataCard>
+
+        <CoachLine>{recommendation.reason}</CoachLine>
+        <UserBubble>So what should I do today?</UserBubble>
+
+        <CoachLine first>Glad you asked. Here's what I would run:</CoachLine>
+
+        <DataCard accent={tokens.ink} label="Today's plan">
+          <View style={styles.planHeader}>
+            <View style={styles.planIcon}>
+              <Activity color={tokens.ink} size={20} strokeWidth={2} />
+            </View>
+            <View style={styles.planCopy}>
+              <Text style={styles.planTitle}>{recommendation.title}</Text>
+              <Text style={styles.planDetail}>{recommendation.detail}</Text>
+            </View>
+          </View>
+
+          <View style={styles.effortChart}>
+            <Sparkline
+              color={tokens.ink}
+              data={[4, 5, 6, recommendation.strain, 6, recommendation.strain, 5, 3]}
+            />
+          </View>
+
+          <View style={styles.strainRow}>
+            <Text style={styles.strainLabel}>Target strain</Text>
+            <Text style={styles.strainValue}>{recommendation.strainTarget}</Text>
+          </View>
+        </DataCard>
+
+        {snapshot.totalSamples === 0 ? (
+          <DataCard accent={tokens.accent} label="Datasource">
+            <Text style={styles.helpText}>
+              Health Connect is the source of truth. Syncing creates raw schema rows,
+              then derives daily coaching metrics locally on this device.
+            </Text>
+            <View style={styles.singleAction}>
+              <AppButton
+                disabled={busy}
+                icon={RefreshCw}
+                label={busy ? status : 'Sync Health Connect'}
+                onPress={onSync}
+                variant="primary"
+              />
+            </View>
+          </DataCard>
+        ) : null}
+
+        {warnings.length ? (
+          <View style={styles.warningPanel}>
+            {warnings.slice(0, 3).map((warning) => (
+              <Text key={warning} style={styles.warningText}>
+                {warning}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+      </ScrollView>
+
+      <View style={styles.chips}>
+        {['Easier option', 'Move to tomorrow', "I'm short on time"].map((chip) => (
+          <View key={chip} style={styles.chip}>
+            <Text style={styles.chipText}>{chip}</Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.composer}>
+        <View style={styles.composerInput}>
+          <Text style={styles.composerText}>Ask your coach…</Text>
+        </View>
+        <View style={styles.micButton}>
+          <Mic color={tokens.surface} size={17} strokeWidth={2} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function DayRow({ day }: { day: DailyMetrics }) {
+  return (
+    <View style={styles.dayRow}>
+      <View style={styles.dayMain}>
+        <Text style={styles.dayTitle}>{formatDateKey(day.date)}</Text>
+        <Text style={styles.dayMeta}>
+          {day.wellnessDataStatus} · {day.sourceCount} domains
+        </Text>
+      </View>
+      <View style={styles.dayStats}>
+        <Text style={styles.dayStat}>{formatNumber(day.steps)}</Text>
+        <Text style={styles.dayStatLabel}>steps</Text>
+      </View>
+      <View style={styles.dayStats}>
+        <Text style={styles.dayStat}>{formatDuration(day.sleepSeconds)}</Text>
+        <Text style={styles.dayStatLabel}>sleep</Text>
+      </View>
+    </View>
+  );
+}
+
+function WorkoutItem({ workout }: { workout: WorkoutRecord }) {
+  const icon =
+    workout.sportBucket === 'strength' ? Dumbbell : workout.sportBucket === 'ride' ? Route : Activity;
+  const Icon = icon;
+
+  return (
+    <View style={styles.workoutRow}>
+      <View style={styles.workoutIcon}>
+        <Icon color={tokens.ink} size={18} strokeWidth={2} />
+      </View>
+      <View style={styles.workoutCopy}>
+        <Text style={styles.workoutTitle}>{workout.name ?? workout.activityType ?? 'Workout'}</Text>
+        <Text style={styles.workoutMeta}>
+          {formatShortDateTime(workout.startAt)} · {formatDuration(workout.elapsedSeconds)}
+        </Text>
+      </View>
+      <ArrowRight color={tokens.muted} size={17} strokeWidth={2} />
+    </View>
+  );
+}
+
+function HistoryScreen({ snapshot }: { snapshot: PipelineSnapshot }) {
+  return (
+    <View style={styles.screen}>
+      <View style={styles.pageHeader}>
+        <Text style={styles.pageEyebrow}>Platform-neutral rollup</Text>
+        <Text style={styles.pageTitle}>History</Text>
+      </View>
+      <ScrollView contentContainerStyle={styles.pageContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.summaryGrid}>
+          <SmallMetric label="Raw samples" value={formatNumber(snapshot.totalSamples)} />
+          <SmallMetric label="Workouts" value={formatNumber(snapshot.workoutCount)} />
+          <SmallMetric label="Sleep rows" value={formatNumber(snapshot.sleepCount)} />
+          <SmallMetric label="Nutrition days" value={formatNumber(snapshot.nutritionDays)} />
+        </View>
+
+        <SectionLabel>Daily metrics</SectionLabel>
+        <View style={styles.listCard}>
+          {snapshot.history.length ? (
+            snapshot.history.map((day) => <DayRow day={day} key={day.date} />)
+          ) : (
+            <Text style={styles.emptyText}>No daily rollups yet.</Text>
+          )}
+        </View>
+
+        <SectionLabel>Recent workouts</SectionLabel>
+        <View style={styles.listCard}>
+          {snapshot.recentWorkouts.length ? (
+            snapshot.recentWorkouts.map((workout) => (
+              <WorkoutItem key={workout.workoutId} workout={workout} />
+            ))
+          ) : (
+            <Text style={styles.emptyText}>No workouts imported yet.</Text>
+          )}
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+function PermissionRow({
+  icon: Icon,
+  title,
+  detail,
+  active,
+}: {
+  icon: LucideIcon;
+  title: string;
+  detail: string;
+  active: boolean;
+}) {
+  return (
+    <View style={styles.permissionRow}>
+      <Icon color={tokens.inkSoft} size={18} strokeWidth={2} />
+      <View style={styles.permissionCopy}>
+        <Text style={styles.permissionTitle}>{title}</Text>
+        <Text style={styles.permissionDetail}>{detail}</Text>
+      </View>
+      <View style={[styles.toggle, active && styles.toggleActive]}>
+        <View style={[styles.toggleKnob, active && styles.toggleKnobActive]}>
+          {active ? <Check color={tokens.accent} size={11} strokeWidth={3} /> : null}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function SourceScreen({
+  snapshot,
+  lastSync,
+  busy,
+  status,
+  rangeDays,
+  setRangeDays,
+  onSync,
+  onExport,
+  onClear,
+}: {
+  snapshot: PipelineSnapshot;
+  lastSync: LastSync;
+  busy: boolean;
+  status: string;
+  rangeDays: number;
+  setRangeDays: (value: number) => void;
+  onSync: () => void;
+  onExport: () => void;
+  onClear: () => void;
+}) {
+  const sourceLabel = currentHealthProviderLabel();
+
+  return (
+    <View style={styles.screen}>
+      <View style={styles.pageHeader}>
+        <Text style={styles.pageEyebrow}>Datasource</Text>
+        <Text style={styles.pageTitle}>{sourceLabel}</Text>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.pageContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.connectCard}>
+          <View style={styles.connectIcon}>
+            {busy ? (
+              <ActivityIndicator color={tokens.accent} />
+            ) : (
+              <Shield color={tokens.accent} size={26} strokeWidth={2} />
+            )}
+          </View>
+          <Text style={styles.connectTitle}>Local API pipeline</Text>
+          <Text style={styles.connectText}>
+            Reads Health Connect records into schema tables, then derives the coaching
+            surface from daily rollups. Nothing leaves the device from this app.
+          </Text>
+          <Text style={styles.connectMeta}>
+            {status} · {dataAge(lastSync)}
+          </Text>
+        </View>
+
+        <View style={styles.rangeRow}>
+          {ranges.map((days) => (
+            <Pressable
+              accessibilityRole="button"
+              key={days}
+              onPress={() => setRangeDays(days)}
+              style={[styles.rangeButton, days === rangeDays && styles.rangeButtonActive]}
+            >
+              <Text
+                style={[
+                  styles.rangeButtonText,
+                  days === rangeDays && styles.rangeButtonTextActive,
+                ]}
+              >
+                {days}d
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <View style={styles.actionsRow}>
+          <AppButton
+            disabled={busy}
+            icon={RefreshCw}
+            label={busy ? 'Syncing' : 'Sync'}
+            onPress={onSync}
+            variant="primary"
+          />
+          <AppButton
+            disabled={busy || snapshot.totalSamples === 0}
+            icon={Download}
+            label="Export"
+            onPress={onExport}
+          />
+        </View>
+        <View style={styles.actionsRow}>
+          {Platform.OS === 'android' ? (
+            <AppButton
+              disabled={busy}
+              icon={Settings}
+              label="Settings"
+              onPress={() => void openAndroidHealthSettings()}
+            />
+          ) : null}
+          <AppButton
+            disabled={busy || snapshot.totalSamples === 0}
+            icon={Trash2}
+            label="Clear"
+            onPress={onClear}
+            variant="danger"
+          />
+        </View>
+
+        <SectionLabel>Schema coverage</SectionLabel>
+        <View style={styles.permissionList}>
+          <PermissionRow
+            active={snapshot.sleepCount > 0}
+            detail="Sleep sessions and stages"
+            icon={Moon}
+            title="Sleep"
+          />
+          <PermissionRow
+            active={snapshot.totalSamples > 0}
+            detail="HR, HRV, resting HR, VO2 max"
+            icon={HeartPulse}
+            title="Vitals"
+          />
+          <PermissionRow
+            active={snapshot.workoutCount > 0}
+            detail="Sessions, duration, sport buckets"
+            icon={Activity}
+            title="Workouts"
+          />
+          <PermissionRow
+            active={Boolean(snapshot.today?.hasSteps || snapshot.today?.hasEnergy)}
+            detail="Steps, energy, distance"
+            icon={Zap}
+            title="Daily activity"
+          />
+          <PermissionRow
+            active={snapshot.nutritionDays > 0}
+            detail="Calories, macros, hydration"
+            icon={Database}
+            title="Nutrition"
+          />
+          <PermissionRow
+            active={Boolean(snapshot.today?.weightKg || snapshot.today?.bodyFatPct)}
+            detail="Weight, body fat, lean mass"
+            icon={ChartColumn}
+            title="Body composition"
+          />
+        </View>
+
+        <View style={styles.privacyCard}>
+          <Lock color={tokens.muted} size={16} strokeWidth={2} />
+          <Text style={styles.privacyText}>
+            Vendor-only metrics such as stress, body battery, sleep score, and
+            training load are preserved only when a source writes them. They are not
+            fabricated from generic platform data.
+          </Text>
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+function TabBar({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {
+  const tabs: { id: Tab; label: string; icon: LucideIcon }[] = [
+    { id: 'coach', label: 'Coach', icon: Sparkles },
+    { id: 'history', label: 'History', icon: History },
+    { id: 'you', label: 'You', icon: User },
+  ];
+
+  return (
+    <View style={styles.tabBar}>
+      {tabs.map((tab) => {
+        const activeTab = active === tab.id;
+        const Icon = tab.icon;
+
+        return (
+          <Pressable
+            accessibilityRole="button"
+            key={tab.id}
+            onPress={() => onChange(tab.id)}
+            style={styles.tabItem}
+          >
+            <Icon
+              color={activeTab ? tokens.ink : tokens.muted}
+              size={23}
+              strokeWidth={activeTab ? 2.2 : 1.8}
+            />
+            <Text style={[styles.tabText, activeTab && styles.tabTextActive]}>
+              {tab.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState<Tab>('coach');
+  const [rangeDays, setRangeDays] = useState(7);
+  const [snapshot, setSnapshot] = useState<PipelineSnapshot>(emptySnapshot);
   const [lastSync, setLastSync] = useState<LastSync>(null);
-  const [recentSamples, setRecentSamples] = useState<RecentSample[]>([]);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Ready');
   const [warnings, setWarnings] = useState<string[]>([]);
 
   const range = useMemo(() => makeSyncRange(rangeDays), [rangeDays]);
-  const providerLabel = currentHealthProviderLabel();
   const canSync = Platform.OS === 'ios' || Platform.OS === 'android';
 
   async function refreshStore() {
-    const [nextSnapshot, nextLastSync, nextRecentSamples] = await Promise.all([
+    const [nextSnapshot, nextLastSync] = await Promise.all([
       getPipelineSnapshot(),
       getLastSyncRun(),
-      getRecentSamples(),
     ]);
-
     setSnapshot(nextSnapshot);
     setLastSync(nextLastSync);
-    setRecentSamples(nextRecentSamples);
   }
 
   useEffect(() => {
-    async function boot() {
-      await initTrainingStore();
-      await refreshStore();
-    }
-
-    void boot().catch((error) => {
-      setStatus(String(error instanceof Error ? error.message : error));
-    });
+    void initTrainingStore()
+      .then(refreshStore)
+      .catch((error) => setStatus(String(error instanceof Error ? error.message : error)));
   }, []);
 
   async function runSync() {
@@ -227,10 +849,10 @@ export default function App() {
 
     try {
       const result = await syncCurrentPlatform(range);
-      const saved = await upsertSamples(result.samples);
+      const saved = await upsertSyncPayload(result);
       await recordSyncRun(result.provider, range, saved, startedAt);
       setWarnings(result.warnings);
-      setStatus(`Synced ${saved.toLocaleString()} samples`);
+      setStatus(`Synced ${saved.toLocaleString()} records`);
       await refreshStore();
     } catch (error) {
       if (provider) {
@@ -256,7 +878,7 @@ export default function App() {
   }
 
   function confirmClear() {
-    Alert.alert('Clear local data', 'Remove imported samples and sync history?', [
+    Alert.alert('Clear local data', 'Remove imported records, rollups, and sync history?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Clear',
@@ -273,285 +895,290 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="dark" />
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.eyebrow}>Local training pipeline</Text>
-            <Text style={styles.title}>{providerLabel}</Text>
-          </View>
-          <View style={styles.headerBadge}>
-            <HeartPulse color="#24535d" size={24} strokeWidth={2.2} />
-          </View>
-        </View>
-
-        <View style={styles.statusPanel}>
-          <View style={styles.statusRow}>
-            <View style={styles.statusIcon}>
-              {busy ? (
-                <ActivityIndicator color="#24535d" />
-              ) : (
-                <ShieldCheck color="#24535d" size={22} strokeWidth={2.2} />
-              )}
-            </View>
-            <View style={styles.statusCopy}>
-              <Text style={styles.statusTitle}>{status}</Text>
-              <Text style={styles.statusMeta}>
-                Last sync {formatShortDateTime(lastSync?.ended_at)} ·{' '}
-                {snapshot.totalSamples.toLocaleString()} samples stored
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.rangeRow}>
-            {ranges.map((days) => (
-              <Pressable
-                accessibilityRole="button"
-                key={days}
-                onPress={() => setRangeDays(days)}
-                style={[
-                  styles.rangeButton,
-                  rangeDays === days && styles.activeRangeButton,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.rangeButtonText,
-                    rangeDays === days && styles.activeRangeButtonText,
-                  ]}
-                >
-                  {days}d
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          <View style={styles.actions}>
-            <Button
-              disabled={busy}
-              icon={RefreshCw}
-              label="Sync"
-              onPress={runSync}
-              variant="primary"
-            />
-            <Button
-              disabled={busy || snapshot.totalSamples === 0}
-              icon={Download}
-              label="Export"
-              onPress={runExport}
-            />
-          </View>
-
-          <View style={styles.actions}>
-            {Platform.OS === 'android' ? (
-              <Button
-                disabled={busy}
-                icon={Settings}
-                label="Settings"
-                onPress={() => void openAndroidHealthSettings()}
-              />
-            ) : null}
-            <Button
-              disabled={busy || snapshot.totalSamples === 0}
-              icon={Trash2}
-              label="Clear"
-              onPress={confirmClear}
-              variant="danger"
-            />
-          </View>
-        </View>
-
-        {warnings.length ? (
-          <View style={styles.warningPanel}>
-            {warnings.slice(0, 3).map((warning) => (
-              <Text key={warning} style={styles.warningText}>
-                {warning}
-              </Text>
-            ))}
-          </View>
+      <View style={styles.appShell}>
+        {activeTab === 'coach' ? (
+          <CoachScreen
+            busy={busy}
+            lastSync={lastSync}
+            onSync={runSync}
+            snapshot={snapshot}
+            status={status}
+            warnings={warnings}
+          />
         ) : null}
-
-        <View style={styles.metricGrid}>
-          {metricOrder.map((metric) => {
-            const today = findMetric(snapshot.today, metric);
-            const week = findMetric(snapshot.trailing7Days, metric);
-
-            return (
-              <MetricCard
-                key={metric}
-                label={metricLabels[metric]}
-                samples={week?.samples ?? today?.samples ?? 0}
-                today={formatMetric(today, metric)}
-                week={formatMetric(week, metric)}
-              />
-            );
-          })}
-        </View>
-
-        <View style={styles.sectionHeader}>
-          <Database color="#24535d" size={20} strokeWidth={2.2} />
-          <Text style={styles.sectionTitle}>Recent samples</Text>
-        </View>
-
-        <View style={styles.sampleList}>
-          {recentSamples.length ? (
-            recentSamples.map((sample) => (
-              <RecentSampleRow key={sample.id} sample={sample} />
-            ))
-          ) : (
-            <Text style={styles.emptyText}>No samples imported yet.</Text>
-          )}
-        </View>
-      </ScrollView>
+        {activeTab === 'history' ? <HistoryScreen snapshot={snapshot} /> : null}
+        {activeTab === 'you' ? (
+          <SourceScreen
+            busy={busy}
+            lastSync={lastSync}
+            onClear={confirmClear}
+            onExport={runExport}
+            onSync={runSync}
+            rangeDays={rangeDays}
+            setRangeDays={setRangeDays}
+            snapshot={snapshot}
+            status={status}
+          />
+        ) : null}
+        <TabBar active={activeTab} onChange={setActiveTab} />
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: {
+    backgroundColor: tokens.bg,
     flex: 1,
-    backgroundColor: '#f4f7f6',
   },
-  content: {
-    padding: 18,
-    paddingBottom: 32,
-    gap: 18,
+  appShell: {
+    flex: 1,
+    backgroundColor: tokens.bg,
   },
-  header: {
+  screen: {
+    flex: 1,
+    backgroundColor: tokens.bg,
+  },
+  topBar: {
     alignItems: 'center',
+    borderBottomColor: tokens.lineSoft,
+    borderBottomWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingTop: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
   },
-  eyebrow: {
-    color: '#6b7774',
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 0,
-    textTransform: 'uppercase',
-  },
-  title: {
-    color: '#102426',
-    fontSize: 34,
-    fontWeight: '800',
-    letterSpacing: 0,
-    marginTop: 3,
-  },
-  headerBadge: {
-    alignItems: 'center',
-    backgroundColor: '#d8efec',
-    borderRadius: 8,
-    height: 48,
-    justifyContent: 'center',
-    width: 48,
-  },
-  statusPanel: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d9e2df',
-    borderRadius: 8,
-    borderWidth: 1,
-    padding: 14,
-    gap: 14,
-  },
-  statusRow: {
+  topBarLeft: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
   },
-  statusIcon: {
-    alignItems: 'center',
-    backgroundColor: '#e7f4f2',
-    borderRadius: 8,
-    height: 44,
-    justifyContent: 'center',
-    width: 44,
-  },
-  statusCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  statusTitle: {
-    color: '#102426',
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 0,
-  },
-  statusMeta: {
-    color: '#65736f',
-    fontSize: 13,
-    letterSpacing: 0,
-  },
-  rangeRow: {
-    backgroundColor: '#edf2f1',
-    borderRadius: 8,
-    flexDirection: 'row',
-    padding: 4,
-  },
-  rangeButton: {
-    alignItems: 'center',
-    borderRadius: 6,
-    flex: 1,
-    minHeight: 36,
-    justifyContent: 'center',
-  },
-  activeRangeButton: {
-    backgroundColor: '#ffffff',
-    borderColor: '#cfdcda',
-    borderWidth: 1,
-  },
-  rangeButtonText: {
-    color: '#65736f',
+  topTitle: {
+    color: tokens.ink,
     fontSize: 14,
     fontWeight: '800',
     letterSpacing: 0,
   },
-  activeRangeButtonText: {
-    color: '#102426',
+  topMeta: {
+    color: tokens.muted,
+    fontSize: 11,
+    letterSpacing: 0,
+    marginTop: 1,
   },
-  actions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  button: {
+  coachAvatar: {
     alignItems: 'center',
-    backgroundColor: '#eef6f4',
-    borderColor: '#cfe0dd',
+    backgroundColor: tokens.ink,
+    justifyContent: 'center',
+  },
+  feed: {
+    gap: 14,
+    padding: 16,
+    paddingBottom: 12,
+  },
+  dateDivider: {
+    alignSelf: 'center',
+    color: tokens.muted,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0,
+    textTransform: 'uppercase',
+  },
+  coachLine: {
+    alignItems: 'flex-end',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  coachLineFirst: {
+    marginTop: 2,
+  },
+  coachBubble: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.lineSoft,
     borderRadius: 8,
     borderWidth: 1,
     flex: 1,
-    flexDirection: 'row',
-    gap: 8,
-    justifyContent: 'center',
-    minHeight: 46,
-    paddingHorizontal: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-  primaryButton: {
-    backgroundColor: '#24535d',
-    borderColor: '#24535d',
-  },
-  dangerButton: {
-    backgroundColor: '#fff4f2',
-    borderColor: '#ffd4cc',
-  },
-  disabledButton: {
-    opacity: 0.45,
-  },
-  pressedButton: {
-    opacity: 0.78,
-  },
-  buttonText: {
-    color: '#24535d',
+  coachText: {
+    color: tokens.inkSoft,
     fontSize: 15,
-    fontWeight: '800',
+    letterSpacing: 0,
+    lineHeight: 22,
+  },
+  userBubble: {
+    alignSelf: 'flex-end',
+    backgroundColor: tokens.ink,
+    borderRadius: 8,
+    maxWidth: '78%',
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  userText: {
+    color: tokens.surface,
+    fontSize: 14,
+    fontWeight: '700',
     letterSpacing: 0,
   },
-  primaryButtonText: {
-    color: '#ffffff',
+  dataCard: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.lineSoft,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 12,
+    padding: 14,
   },
-  dangerButtonText: {
-    color: '#b42318',
+  dataCardHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  dataCardAccent: {
+    borderRadius: 3,
+    height: 6,
+    width: 6,
+  },
+  sectionLabel: {
+    color: tokens.muted,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0,
+    textTransform: 'uppercase',
+  },
+  recoveryRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 14,
+  },
+  recoveryCopy: {
+    flex: 1,
+    gap: 9,
+  },
+  readinessLine: {
+    alignItems: 'baseline',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  readinessLabel: {
+    color: tokens.ink,
+    fontSize: 18,
+    fontStyle: 'italic',
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  readinessMeta: {
+    color: tokens.muted,
+    fontSize: 12,
+    letterSpacing: 0,
+  },
+  ringCenter: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+  },
+  ringValue: {
+    color: tokens.ink,
+    fontSize: 24,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  metricGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  smallMetric: {
+    backgroundColor: tokens.surfaceAlt,
+    borderColor: tokens.lineSoft,
+    borderRadius: 8,
+    borderWidth: 1,
+    minHeight: 56,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    width: '47.5%',
+  },
+  smallMetricLabel: {
+    color: tokens.muted,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0,
+    textTransform: 'uppercase',
+  },
+  smallMetricValue: {
+    color: tokens.ink,
+    fontSize: 17,
+    fontWeight: '900',
+    letterSpacing: 0,
+    marginTop: 4,
+  },
+  smallMetricSub: {
+    color: tokens.muted,
+    fontSize: 11,
+    letterSpacing: 0,
+    marginTop: 2,
+  },
+  planHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+  },
+  planIcon: {
+    alignItems: 'center',
+    backgroundColor: tokens.surfaceAlt,
+    borderColor: tokens.lineSoft,
+    borderRadius: 8,
+    borderWidth: 1,
+    height: 42,
+    justifyContent: 'center',
+    width: 42,
+  },
+  planCopy: {
+    flex: 1,
+  },
+  planTitle: {
+    color: tokens.ink,
+    fontSize: 20,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  planDetail: {
+    color: tokens.muted,
+    fontSize: 13,
+    letterSpacing: 0,
+    marginTop: 2,
+  },
+  effortChart: {
+    backgroundColor: tokens.surfaceAlt,
+    borderRadius: 8,
+    height: 52,
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  strainRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  strainLabel: {
+    color: tokens.muted,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  strainValue: {
+    color: tokens.ink,
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  helpText: {
+    color: tokens.inkSoft,
+    fontSize: 13,
+    letterSpacing: 0,
+    lineHeight: 20,
+  },
+  singleAction: {
+    marginTop: 2,
   },
   warningPanel: {
     backgroundColor: '#fff8df',
@@ -563,104 +1190,377 @@ const styles = StyleSheet.create({
   },
   warningText: {
     color: '#6d5600',
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
     letterSpacing: 0,
   },
-  metricGrid: {
+  chips: {
+    borderTopColor: tokens.lineSoft,
+    borderTopWidth: 1,
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
+    gap: 7,
+    paddingHorizontal: 14,
+    paddingTop: 8,
   },
-  metricCard: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d9e2df',
+  chip: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
     borderRadius: 8,
     borderWidth: 1,
-    minHeight: 132,
-    padding: 12,
-    width: '48.5%',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
   },
-  metricLabel: {
-    color: '#65736f',
-    fontSize: 13,
+  chipText: {
+    color: tokens.inkSoft,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  composer: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  composerInput: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+    minHeight: 42,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+  composerText: {
+    color: tokens.muted,
+    fontSize: 14,
+    letterSpacing: 0,
+  },
+  micButton: {
+    alignItems: 'center',
+    backgroundColor: tokens.ink,
+    borderRadius: 8,
+    height: 42,
+    justifyContent: 'center',
+    width: 42,
+  },
+  pageHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
+  pageEyebrow: {
+    color: tokens.muted,
+    fontSize: 12,
     fontWeight: '800',
     letterSpacing: 0,
     textTransform: 'uppercase',
   },
-  metricValue: {
-    color: '#102426',
-    fontSize: 26,
+  pageTitle: {
+    color: tokens.ink,
+    fontSize: 34,
     fontWeight: '900',
     letterSpacing: 0,
-    marginTop: 12,
+    marginTop: 2,
   },
-  metricSubvalue: {
-    color: '#24535d',
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 0,
-    marginTop: 6,
+  pageContent: {
+    gap: 14,
+    padding: 18,
+    paddingBottom: 28,
   },
-  metricMeta: {
-    color: '#7d8a86',
-    fontSize: 12,
-    letterSpacing: 0,
-    marginTop: 8,
-  },
-  sectionHeader: {
-    alignItems: 'center',
+  summaryGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
   },
-  sectionTitle: {
-    color: '#102426',
-    fontSize: 18,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
-  sampleList: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d9e2df',
+  listCard: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.lineSoft,
     borderRadius: 8,
     borderWidth: 1,
     overflow: 'hidden',
   },
-  sampleRow: {
+  dayRow: {
     alignItems: 'center',
-    borderBottomColor: '#edf1f0',
+    borderBottomColor: tokens.lineSoft,
     borderBottomWidth: 1,
     flexDirection: 'row',
     gap: 10,
-    minHeight: 58,
+    minHeight: 68,
     paddingHorizontal: 12,
   },
-  sampleDot: {
-    backgroundColor: '#69b3a9',
-    borderRadius: 4,
-    height: 8,
-    width: 8,
-  },
-  sampleContent: {
+  dayMain: {
     flex: 1,
-    gap: 3,
   },
-  sampleTitle: {
-    color: '#102426',
+  dayTitle: {
+    color: tokens.ink,
     fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  dayMeta: {
+    color: tokens.muted,
+    fontSize: 12,
+    letterSpacing: 0,
+    marginTop: 2,
+  },
+  dayStats: {
+    alignItems: 'flex-end',
+    minWidth: 62,
+  },
+  dayStat: {
+    color: tokens.ink,
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  dayStatLabel: {
+    color: tokens.muted,
+    fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0,
-    textTransform: 'capitalize',
+    textTransform: 'uppercase',
   },
-  sampleMeta: {
-    color: '#65736f',
-    fontSize: 13,
+  workoutRow: {
+    alignItems: 'center',
+    borderBottomColor: tokens.lineSoft,
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 66,
+    paddingHorizontal: 12,
+  },
+  workoutIcon: {
+    alignItems: 'center',
+    backgroundColor: tokens.surfaceAlt,
+    borderRadius: 8,
+    height: 38,
+    justifyContent: 'center',
+    width: 38,
+  },
+  workoutCopy: {
+    flex: 1,
+  },
+  workoutTitle: {
+    color: tokens.ink,
+    fontSize: 14,
+    fontWeight: '900',
     letterSpacing: 0,
+  },
+  workoutMeta: {
+    color: tokens.muted,
+    fontSize: 12,
+    letterSpacing: 0,
+    marginTop: 2,
   },
   emptyText: {
-    color: '#65736f',
+    color: tokens.muted,
     fontSize: 14,
     letterSpacing: 0,
+    padding: 14,
+  },
+  connectCard: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.lineSoft,
+    borderRadius: 8,
+    borderWidth: 1,
     padding: 16,
+  },
+  connectIcon: {
+    alignItems: 'center',
+    backgroundColor: tokens.accentSoft,
+    borderRadius: 8,
+    height: 54,
+    justifyContent: 'center',
+    marginBottom: 14,
+    width: 54,
+  },
+  connectTitle: {
+    color: tokens.ink,
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  connectText: {
+    color: tokens.inkSoft,
+    fontSize: 13,
+    letterSpacing: 0,
+    lineHeight: 20,
+    marginTop: 6,
+  },
+  connectMeta: {
+    color: tokens.muted,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0,
+    marginTop: 12,
+  },
+  rangeRow: {
+    backgroundColor: tokens.bgDeep,
+    borderRadius: 8,
+    flexDirection: 'row',
+    padding: 4,
+  },
+  rangeButton: {
+    alignItems: 'center',
+    borderRadius: 6,
+    flex: 1,
+    minHeight: 36,
+    justifyContent: 'center',
+  },
+  rangeButtonActive: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderWidth: 1,
+  },
+  rangeButtonText: {
+    color: tokens.muted,
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  rangeButtonTextActive: {
+    color: tokens.ink,
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  button: {
+    alignItems: 'center',
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+    flexDirection: 'row',
+    gap: 7,
+    justifyContent: 'center',
+    minHeight: 46,
+    paddingHorizontal: 10,
+  },
+  buttonPrimary: {
+    backgroundColor: tokens.ink,
+    borderColor: tokens.ink,
+  },
+  buttonDanger: {
+    backgroundColor: '#fff4f2',
+    borderColor: '#ffd4cc',
+  },
+  buttonText: {
+    color: tokens.ink,
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  buttonPrimaryText: {
+    color: tokens.surface,
+  },
+  buttonDangerText: {
+    color: tokens.danger,
+  },
+  disabled: {
+    opacity: 0.45,
+  },
+  pressed: {
+    opacity: 0.78,
+  },
+  permissionList: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  permissionRow: {
+    alignItems: 'center',
+    borderBottomColor: tokens.lineSoft,
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 62,
+    paddingHorizontal: 14,
+  },
+  permissionCopy: {
+    flex: 1,
+  },
+  permissionTitle: {
+    color: tokens.ink,
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  permissionDetail: {
+    color: tokens.muted,
+    fontSize: 12,
+    letterSpacing: 0,
+    marginTop: 2,
+  },
+  toggle: {
+    backgroundColor: tokens.line,
+    borderRadius: 8,
+    height: 24,
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+    width: 40,
+  },
+  toggleActive: {
+    backgroundColor: tokens.ink,
+  },
+  toggleKnob: {
+    alignItems: 'center',
+    backgroundColor: tokens.surface,
+    borderRadius: 8,
+    height: 20,
+    justifyContent: 'center',
+    width: 20,
+  },
+  toggleKnobActive: {
+    marginLeft: 16,
+  },
+  privacyCard: {
+    alignItems: 'flex-start',
+    backgroundColor: tokens.surfaceAlt,
+    borderColor: tokens.lineSoft,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    padding: 14,
+  },
+  privacyText: {
+    color: tokens.muted,
+    flex: 1,
+    fontSize: 12,
+    letterSpacing: 0,
+    lineHeight: 18,
+  },
+  tabBar: {
+    backgroundColor: tokens.surface,
+    borderTopColor: tokens.line,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    paddingHorizontal: 8,
+    paddingTop: 7,
+    paddingBottom: 5,
+  },
+  tabItem: {
+    alignItems: 'center',
+    flex: 1,
+    gap: 3,
+    minHeight: 50,
+    justifyContent: 'center',
+  },
+  tabText: {
+    color: tokens.muted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  tabTextActive: {
+    color: tokens.ink,
+    fontWeight: '900',
   },
 });

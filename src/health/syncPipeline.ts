@@ -6,7 +6,7 @@ import type { HealthProvider, SyncRange, SyncResult } from './types';
 
 export function currentHealthProviderId(): HealthProvider | undefined {
   if (Platform.OS === 'ios') {
-    return 'apple_health';
+    return 'healthkit';
   }
 
   if (Platform.OS === 'android') {
