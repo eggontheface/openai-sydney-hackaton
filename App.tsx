@@ -25,6 +25,7 @@ import {
   HeartPulse,
   History,
   Lock,
+  Mic,
   Moon,
   MoreHorizontal,
   RefreshCw,
@@ -38,6 +39,12 @@ import {
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
+import {
+  answerCoachQuestion,
+  generateTrainingPlan,
+  type PlannedWorkout,
+  type TrainingPlan,
+} from './src/coach/planEngine';
 import { openAndroidHealthSettings } from './src/health/healthConnect';
 import {
   currentHealthProviderId,
@@ -93,22 +100,23 @@ const emptyAppSettings: AppSettings = {
 };
 
 const tokens = {
-  bg: '#eef2ee',
-  bgDeep: '#dde6dd',
+  bg: '#fafaf8',
+  bgDeep: '#f0efea',
   surface: '#ffffff',
-  surfaceAlt: '#f5f8f4',
-  ink: '#0d1f1a',
-  inkSoft: '#274432',
-  muted: '#5a8071',
-  line: '#cfdcd1',
-  lineSoft: '#e0eae0',
-  accent: '#1f5a3d',
-  accentDeep: '#0d3a23',
-  accentSoft: '#cfe5d6',
-  positive: '#3f8f5a',
-  warm: '#d8a95e',
-  cool: '#4a7a90',
+  surfaceAlt: '#f5f4f0',
+  ink: '#0a0a0a',
+  inkSoft: '#2a2a2a',
+  muted: '#6a6a6a',
+  line: '#e6e6e2',
+  lineSoft: '#f0f0ec',
+  accent: '#0a0a0a',
+  accentDeep: '#000000',
+  accentSoft: '#e8e8e4',
+  positive: '#0a7a4a',
+  warm: '#b8915a',
+  cool: '#5a7a9a',
   danger: '#b42318',
+  serif: 'Georgia',
 };
 
 const emptySnapshot: PipelineSnapshot = {
@@ -137,7 +145,7 @@ const emptySnapshot: PipelineSnapshot = {
 };
 
 type LastSync = Awaited<ReturnType<typeof getLastSyncRun>>;
-type Tab = 'coach' | 'analytics' | 'history' | 'you';
+type Tab = 'coach' | 'workout' | 'analytics' | 'history' | 'you';
 
 type MetricStatus = 'live' | 'permission' | 'empty' | 'unchecked';
 
@@ -360,17 +368,20 @@ function SectionLabel({ children }: { children: string }) {
 
 function CoachAvatar({ size = 34 }: { size?: number }) {
   return (
-    <View
-      style={[
-        styles.coachAvatar,
-        {
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-        },
-      ]}
-    >
-      <Sparkles color={tokens.surface} size={size * 0.48} strokeWidth={2} />
+    <View style={styles.coachAvatarWrap}>
+      <View
+        style={[
+          styles.coachAvatar,
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+          },
+        ]}
+      >
+        <Text style={[styles.coachAvatarText, { fontSize: size * 0.45 }]}>c</Text>
+      </View>
+      <View style={styles.coachOnlineDot} />
     </View>
   );
 }
@@ -449,10 +460,8 @@ function Sparkline({ data, color }: { data: number[]; color: string }) {
 function CoachLine({ children, first }: { children: string; first?: boolean }) {
   return (
     <View style={[styles.coachLine, first && styles.coachLineFirst]}>
-      <CoachAvatar size={28} />
-      <View style={styles.coachBubble}>
-        <Text style={styles.coachText}>{children}</Text>
-      </View>
+      {first ? <CoachAvatar size={32} /> : <View style={styles.coachSpacer} />}
+      <Text style={styles.coachText}>{children}</Text>
     </View>
   );
 }
@@ -469,17 +478,21 @@ function DataCard({
   label,
   children,
   accent,
+  inset,
 }: {
   label: string;
   children: React.ReactNode;
   accent?: string;
+  inset?: boolean;
 }) {
   return (
-    <View style={styles.dataCard}>
-      <View style={styles.dataCardHeader}>
-        <View style={[styles.dataCardAccent, { backgroundColor: accent ?? tokens.accent }]} />
-        <SectionLabel>{label}</SectionLabel>
-      </View>
+    <View style={[styles.dataCard, inset && styles.dataCardInset, accent && styles.dataCardWithAccent]}>
+      {label ? (
+        <View style={styles.dataCardHeader}>
+          <View style={[styles.dataCardAccent, { backgroundColor: accent ?? tokens.accent }]} />
+          <SectionLabel>{label}</SectionLabel>
+        </View>
+      ) : null}
       {children}
     </View>
   );
@@ -516,6 +529,7 @@ function CoachScreen({
   onChangeCoachDraft,
   onSendCoachMessage,
   onSync,
+  onOpenWorkout,
 }: {
   coachBusy: boolean;
   coachDraft: string;
@@ -529,18 +543,15 @@ function CoachScreen({
   onChangeCoachDraft: (value: string) => void;
   onSendCoachMessage: (message?: string) => void;
   onSync: () => void;
+  onOpenWorkout: () => void;
 }) {
   const current = snapshot.today;
   const recommendation = snapshot.recommendation;
   const accent = toneColor(recommendation.color);
+  const plan = useMemo(() => generateTrainingPlan(snapshot, 'run'), [snapshot]);
   const sleep = current?.sleepSeconds ? formatDuration(current.sleepSeconds) : '—';
   const hrv = current?.hrvLastNightAvg ? `${Math.round(current.hrvLastNightAvg)} ms` : '—';
   const rhr = current?.restingHr ? `${Math.round(current.restingHr)} bpm` : '—';
-  const sparkData = snapshot.history
-    .slice()
-    .reverse()
-    .map((row) => row.hrvLastNightAvg ?? row.restingHr ?? row.steps ?? 0)
-    .slice(-10);
   const quickReplies = ['Make it easier', 'Move it to tomorrow', "I'm short on time"];
   const canSendCoachMessage = hasOpenAiApiKey && !coachBusy && Boolean(coachDraft.trim());
   const composerPlaceholder = hasOpenAiApiKey
@@ -596,54 +607,45 @@ function CoachScreen({
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.dateDivider}>This morning</Text>
-        <CoachLine first>{recommendation.opener}</CoachLine>
+        <CoachLine first>Good morning Martin.</CoachLine>
 
-        <DataCard accent={accent} label="Last night">
-          <View style={styles.recoveryRow}>
-            <Ring color={accent} value={recommendation.readiness} />
-            <View style={styles.recoveryCopy}>
-              <View style={styles.readinessLine}>
-                <Text style={styles.readinessLabel}>{recommendation.readinessLabel}</Text>
-                <Text style={styles.readinessMeta}>readiness</Text>
-              </View>
-              <View style={styles.metricGrid}>
-                <SmallMetric label="HRV" value={hrv} />
-                <SmallMetric label="RHR" value={rhr} />
-                <SmallMetric label="Sleep" value={sleep} />
-                <SmallMetric
-                  label="Steps"
-                  value={formatNumber(current?.steps)}
-                />
-              </View>
-            </View>
+        <DataCard accent={accent} inset label="Sleep & recovery">
+          <View style={styles.sourceLine}>
+            <Text style={styles.sourceLineText}>
+              {current?.hasSleep ? 'Apple Watch' : 'Waiting for wearable data'}
+            </Text>
+            <Text style={styles.sourceLineText}>{dataAge(lastSync)}</Text>
           </View>
+          <View style={styles.metricGridFull}>
+            <SmallMetric label="Sleep" value={sleep} />
+            <SmallMetric label="Score" value={formatNumber(recommendation.readiness ?? undefined)} />
+            <SmallMetric label="HRV" value={hrv.replace(' ms', '')} />
+            <SmallMetric label="RHR" value={rhr.replace(' bpm', '')} />
+          </View>
+          <Text style={styles.helpText}>{recommendation.reason}</Text>
         </DataCard>
 
-        <CoachLine>{recommendation.reason}</CoachLine>
-
-        <DataCard accent={tokens.ink} label="Today's plan">
-          <View style={styles.planHeader}>
-            <View style={styles.planIcon}>
-              <Activity color={tokens.ink} size={20} strokeWidth={2} />
+        <Pressable accessibilityRole="button" onPress={onOpenWorkout}>
+          <DataCard accent={tokens.ink} inset label="Today's workout">
+            <View style={styles.planHeader}>
+              <View style={styles.planIcon}>
+                <Activity color={tokens.surface} size={18} strokeWidth={2} />
+              </View>
+              <View style={styles.planCopy}>
+                <Text style={styles.planTitle}>{plan.today.title}</Text>
+                <View style={styles.coachPlanStats}>
+                  <Text style={styles.coachPlanStat}>{plan.today.durationMinutes}:00</Text>
+                  <Text style={styles.coachPlanStat}>~7.2 km</Text>
+                  <Text style={styles.coachPlanStat}>{plan.today.intensity}</Text>
+                </View>
+                <Text style={styles.planDetail}>
+                  Your Apple Watch will capture distance, pace, heart rate, route, splits, and duration.
+                </Text>
+              </View>
+              <ArrowRight color={tokens.muted} size={17} strokeWidth={2} />
             </View>
-            <View style={styles.planCopy}>
-              <Text style={styles.planTitle}>{recommendation.title}</Text>
-              <Text style={styles.planDetail}>{recommendation.detail}</Text>
-            </View>
-          </View>
-
-          <View style={styles.effortChart}>
-            <Sparkline
-              color={tokens.ink}
-              data={[4, 5, 6, recommendation.strain, 6, recommendation.strain, 5, 3]}
-            />
-          </View>
-
-          <View style={styles.strainRow}>
-            <Text style={styles.strainLabel}>Target strain</Text>
-            <Text style={styles.strainValue}>{recommendation.strainTarget}</Text>
-          </View>
-        </DataCard>
+          </DataCard>
+        </Pressable>
 
         {coachMessages.length ? <Text style={styles.dateDivider}>Coach conversation</Text> : null}
         {coachMessages.map((message) =>
@@ -658,7 +660,7 @@ function CoachScreen({
         ) : null}
 
         {!hasSyncedData ? (
-          <DataCard accent={tokens.accent} label="Datasource">
+          <DataCard accent={tokens.accent} inset label="Datasource">
             <Text style={styles.helpText}>
               Health Connect is the source of truth. Syncing creates raw schema rows,
               then derives daily coaching metrics locally on this device.
@@ -740,6 +742,287 @@ function CoachScreen({
   );
 }
 
+type CoachMessage = {
+  id: string;
+  role: 'user' | 'coach';
+  text: string;
+};
+
+function workoutIconFor(workout: PlannedWorkout): LucideIcon {
+  if (workout.sport === 'strength') return Dumbbell;
+  if (workout.sport === 'ride') return Route;
+  if (workout.sport === 'recovery') return Moon;
+  return Activity;
+}
+
+function CapturePill({ workout }: { workout: PlannedWorkout }) {
+  const copy =
+    workout.capture === 'manual'
+      ? 'Manual strength metrics'
+      : workout.capture === 'watch'
+        ? 'Watch captured'
+        : 'No input needed';
+
+  return (
+    <View style={styles.capturePill}>
+      <Text style={styles.capturePillText}>{copy}</Text>
+    </View>
+  );
+}
+
+function WorkoutDetail({ workout }: { workout: PlannedWorkout }) {
+  const Icon = workoutIconFor(workout);
+
+  return (
+    <DataCard accent={tokens.ink} label={workout.label === 'Today' ? 'Workout today' : workout.label}>
+      <View style={styles.planHeader}>
+        <View style={styles.planIcon}>
+          <Icon color={tokens.ink} size={20} strokeWidth={2} />
+        </View>
+        <View style={styles.planCopy}>
+          <Text style={styles.planTitle}>{workout.title}</Text>
+          <Text style={styles.planDetail}>{workout.detail}</Text>
+        </View>
+      </View>
+      <View style={styles.workoutMetaRow}>
+        <CapturePill workout={workout} />
+        <Text style={styles.durationBadge}>
+          {workout.durationMinutes ? `${workout.durationMinutes} min` : 'Rest'}
+        </Text>
+      </View>
+      <Text style={styles.helpText}>{workout.reason}</Text>
+      {workout.metrics.length ? (
+        <View style={styles.metricTags}>
+          {workout.metrics.map((metric) => (
+            <View key={metric} style={styles.metricTag}>
+              <Text style={styles.metricTagText}>{metric}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+    </DataCard>
+  );
+}
+
+function EffortProfileCard() {
+  return (
+    <DataCard accent={tokens.ink} label="Effort profile">
+      <View style={styles.effortHeader}>
+        <Text style={styles.effortMeta}>Watch metrics</Text>
+      </View>
+      <View style={styles.effortChartLarge}>
+        <Svg height={78} width="100%" viewBox="0 0 300 78" preserveAspectRatio="none">
+          <Path
+            d="M0,70 L38,66 L58,52 L76,44 L88,24 L100,40 L112,22 L124,39 L136,21 L148,39 L160,22 L172,40 L184,22 L196,39 L208,21 L220,38 L232,22 L244,44 L300,62 L300,78 L0,78 Z"
+            fill="#deded8"
+          />
+          <Path
+            d="M0,70 L38,66 L58,52 L76,44 L88,24 L100,40 L112,22 L124,39 L136,21 L148,39 L160,22 L172,40 L184,22 L196,39 L208,21 L220,38 L232,22 L244,44 L300,62"
+            fill="none"
+            stroke={tokens.ink}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+          />
+        </Svg>
+      </View>
+    </DataCard>
+  );
+}
+
+function PlanDayRow({
+  workout,
+  selected,
+  onPress,
+}: {
+  workout: PlannedWorkout;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const Icon = workoutIconFor(workout);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={[styles.planDayRow, selected && styles.planDayRowActive]}
+    >
+      <View style={styles.planDayLabel}>
+        <Text style={styles.planDayText}>{workout.label}</Text>
+      </View>
+      <View style={styles.workoutIcon}>
+        <Icon color={tokens.ink} size={18} strokeWidth={2} />
+      </View>
+      <View style={styles.workoutCopy}>
+        <Text style={styles.workoutTitle}>{workout.title}</Text>
+        <Text style={styles.workoutMeta}>
+          {workout.durationMinutes ? `${workout.durationMinutes} min` : 'Rest'} · {workout.intensity}
+        </Text>
+      </View>
+      <ArrowRight color={tokens.muted} size={17} strokeWidth={2} />
+    </Pressable>
+  );
+}
+
+function CoachDock({ plan }: { plan: TrainingPlan }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [messages, setMessages] = useState<CoachMessage[]>([]);
+
+  function send() {
+    const question = draft.trim();
+    if (!question) return;
+
+    const answer = answerCoachQuestion(question, plan);
+    setMessages((current) => [
+      ...current,
+      { id: `${Date.now()}-user`, role: 'user', text: question },
+      { id: `${Date.now()}-coach`, role: 'coach', text: answer },
+    ]);
+    setDraft('');
+    setCollapsed(false);
+  }
+
+  if (collapsed) {
+    return (
+      <Pressable accessibilityRole="button" onPress={() => setCollapsed(false)} style={styles.coachBubbleButton}>
+        <Sparkles color={tokens.surface} size={18} strokeWidth={2} />
+      </Pressable>
+    );
+  }
+
+  return (
+    <View style={styles.coachDock}>
+      {messages.length ? (
+        <View style={styles.coachDockMessages}>
+          {messages.slice(-4).map((message) => (
+            <View
+              key={message.id}
+              style={[
+                styles.coachDockMessage,
+                message.role === 'user' && styles.coachDockMessageUser,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.coachDockMessageText,
+                  message.role === 'user' && styles.coachDockMessageTextUser,
+                ]}
+              >
+                {message.text}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+      <View style={styles.coachDockInputRow}>
+        <Sparkles color={tokens.ink} size={15} strokeWidth={2} />
+        <TextInput
+          onChangeText={setDraft}
+          onSubmitEditing={send}
+          placeholder="Ask about today or the week..."
+          placeholderTextColor={tokens.muted}
+          returnKeyType="send"
+          style={styles.coachDockInput}
+          value={draft}
+        />
+        <Mic color={tokens.muted} size={15} strokeWidth={2} />
+        <Pressable
+          accessibilityRole="button"
+          onPress={draft.trim() ? send : () => setCollapsed(true)}
+          style={[styles.coachDockSend, !draft.trim() && styles.coachDockCollapse]}
+        >
+          <ArrowRight color={draft.trim() ? tokens.surface : tokens.muted} size={18} strokeWidth={2.2} />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function WorkoutPlanScreen({ snapshot }: { snapshot: PipelineSnapshot }) {
+  const plan = useMemo(() => generateTrainingPlan(snapshot, 'run'), [snapshot]);
+  const [selectedId, setSelectedId] = useState(plan.today.id);
+  const selected = plan.week.find((workout) => workout.id === selectedId) ?? plan.today;
+  const TodayIcon = workoutIconFor(plan.today);
+
+  return (
+    <View style={styles.screen}>
+      <View style={styles.workoutTopBar}>
+        <View style={styles.roundIconButton}>
+          <Sparkles color={tokens.ink} size={16} strokeWidth={2} />
+        </View>
+        <SectionLabel>Workout</SectionLabel>
+        <View style={styles.roundIconButton}>
+          <MoreHorizontal color={tokens.ink} size={16} strokeWidth={2} />
+        </View>
+      </View>
+      <ScrollView contentContainerStyle={styles.workoutContent} showsVerticalScrollIndicator={false}>
+        <Text style={styles.workoutIntro}>Today · built from readiness</Text>
+        <Text style={styles.workoutWelcome}>Welcome to today's workout</Text>
+        <Text style={styles.workoutSubcopy}>
+          One clear session for today, then a simple view of how the next seven days shape up.
+        </Text>
+
+        <SectionLabel>Workout today</SectionLabel>
+        <DataCard accent={tokens.ink} label="">
+          <View style={styles.planHeader}>
+            <View style={styles.planIcon}>
+              <TodayIcon color={tokens.surface} size={18} strokeWidth={2} />
+            </View>
+            <View style={styles.planCopy}>
+              <Text style={styles.planTitle}>{plan.today.title}</Text>
+              <View style={styles.coachPlanStats}>
+                <Text style={styles.coachPlanStat}>{plan.today.durationMinutes}:00 total</Text>
+                <Text style={styles.coachPlanStat}>~7.2 km</Text>
+                <Text style={styles.coachPlanStat}>{plan.today.intensity}</Text>
+              </View>
+            </View>
+          </View>
+          <View style={styles.capturePanel}>
+            <View style={styles.captureTitleRow}>
+              <Moon color={tokens.inkSoft} size={13} strokeWidth={2} />
+              <Text style={styles.captureTitle}>Captured by Apple Watch</Text>
+            </View>
+            <Text style={styles.planDetail}>
+              Distance, pace, heart rate, route, splits, and duration will be recorded automatically.
+            </Text>
+          </View>
+        </DataCard>
+
+        <EffortProfileCard />
+
+        <DataCard accent={tokens.accent} label="Why this, today">
+          <Text style={styles.helpText}>{plan.whyToday}</Text>
+        </DataCard>
+
+        <SectionLabel>Plan</SectionLabel>
+        <View style={styles.listCard}>
+          {plan.week.map((workout) => (
+            <PlanDayRow
+              key={workout.id}
+              onPress={() => setSelectedId(workout.id)}
+              selected={selected.id === workout.id}
+              workout={workout}
+            />
+          ))}
+        </View>
+
+        <WorkoutDetail workout={selected} />
+        <CoachDock plan={plan} />
+      </ScrollView>
+      <View style={styles.workoutActions}>
+        <Pressable accessibilityRole="button" style={styles.startWatchButton}>
+          <Moon color={tokens.surface} size={16} strokeWidth={2} />
+          <Text style={styles.startWatchText}>Start on Watch</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" style={styles.scheduleButton}>
+          <Text style={styles.scheduleText}>Schedule</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 function DayRow({ day }: { day: DailyMetrics }) {
   return (
     <View style={styles.dayRow}>
@@ -782,14 +1065,87 @@ function WorkoutItem({ workout }: { workout: WorkoutRecord }) {
   );
 }
 
+function SignalTrendChart({ history }: { history: DailyMetrics[] }) {
+  const values = history
+    .slice()
+    .reverse()
+    .slice(-7)
+    .map((day) => day.hrvLastNightAvg ?? day.restingHr ?? 0);
+  const labels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const range = max - min || 1;
+  const points = values.map((value, index) => {
+    const x = 18 + (index / Math.max(values.length - 1, 1)) * 264;
+    const y = 118 - ((value - min) / range) * 82;
+    return [x, y];
+  });
+  const line = points.map(([x, y], index) => `${index === 0 ? 'M' : 'L'}${x},${y}`).join(' ');
+
+  return (
+    <View style={styles.signalChart}>
+      <View style={styles.signalChartHeader}>
+        <View>
+          <SectionLabel>HRV · 7-day</SectionLabel>
+          <View style={styles.signalValueLine}>
+            <Text style={styles.signalValue}>{formatNumber(values[values.length - 1], 0)}</Text>
+            <Text style={styles.signalUnit}>ms</Text>
+          </View>
+        </View>
+        <View style={styles.signalBaseline}>
+          <Text style={styles.signalBaselineText}>vs baseline</Text>
+          <Text style={styles.signalDelta}>+2 ms</Text>
+        </View>
+      </View>
+      <Svg height={150} width="100%" viewBox="0 0 300 150" preserveAspectRatio="none">
+        <Rect fill={tokens.surfaceAlt} height={82} width={264} x={18} y={44} />
+        <Path d="M18,86 L282,86" stroke={tokens.line} strokeDasharray="4 4" strokeWidth={1.4} />
+        <Path d={line} fill="none" stroke={tokens.cool} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.4} />
+        {points.map(([x, y], index) => (
+          <Circle cx={x} cy={y} fill={tokens.cool} key={`${x}-${y}-${index}`} r={3} />
+        ))}
+      </Svg>
+      <View style={styles.signalDays}>
+        {labels.map((label, index) => (
+          <Text key={`${label}-${index}`} style={styles.signalDayText}>
+            {label}
+          </Text>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function HistoryScreen({ snapshot }: { snapshot: PipelineSnapshot }) {
+  const [activeSignal, setActiveSignal] = useState('Recovery');
+  const today = snapshot.today;
+  const imported = snapshot.recentWorkouts.length
+    ? snapshot.recentWorkouts.slice(0, 4)
+    : [];
+
   return (
     <View style={styles.screen}>
-      <View style={styles.pageHeader}>
-        <Text style={styles.pageEyebrow}>Platform-neutral rollup</Text>
-        <Text style={styles.pageTitle}>History</Text>
-      </View>
-      <ScrollView contentContainerStyle={styles.pageContent} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={styles.historySignalContent} showsVerticalScrollIndicator={false}>
+        <Text style={styles.historyWindow}>Last 7 days</Text>
+        <Text style={styles.historyTitle}>
+          Your <Text style={styles.historyTitleItalic}>signal</Text>
+        </Text>
+
+        <View style={styles.signalTabs}>
+          {['Recovery', 'Strain', 'Sleep', 'Body'].map((signal) => (
+            <Pressable
+              accessibilityRole="button"
+              key={signal}
+              onPress={() => setActiveSignal(signal)}
+              style={[styles.signalTab, activeSignal === signal && styles.signalTabActive]}
+            >
+              <Text style={[styles.signalTabText, activeSignal === signal && styles.signalTabTextActive]}>
+                {signal}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
         <View style={styles.summaryGrid}>
           <SmallMetric label="Raw samples" value={formatNumber(snapshot.totalSamples)} />
           <SmallMetric label="Workouts" value={formatNumber(snapshot.workoutCount)} />
@@ -797,26 +1153,39 @@ function HistoryScreen({ snapshot }: { snapshot: PipelineSnapshot }) {
           <SmallMetric label="Nutrition days" value={formatNumber(snapshot.nutritionDays)} />
         </View>
 
-        <SectionLabel>Daily metrics</SectionLabel>
-        <View style={styles.listCard}>
-          {snapshot.history.length ? (
-            snapshot.history.map((day) => <DayRow day={day} key={day.date} />)
-          ) : (
-            <Text style={styles.emptyText}>No daily rollups yet.</Text>
-          )}
+        <SignalTrendChart history={snapshot.history} />
+
+        <View style={styles.historyMiniGrid}>
+          <View style={styles.historyMiniColumn}>
+            <DataCard accent={tokens.cool} label="Sleep">
+              <Text style={styles.historyMiniValue}>{formatDuration(today?.sleepSeconds)}</Text>
+              <View style={styles.sleepBars}>
+                {[0.62, 0.72, 0.66, 0.7, 0.55, 0.61, 0.82].map((height, index) => (
+                  <View key={index} style={[styles.sleepBar, { height: 34 * height }]} />
+                ))}
+              </View>
+            </DataCard>
+          </View>
+          <View style={styles.historyMiniColumn}>
+            <DataCard accent={tokens.ink} label="RHR">
+              <Text style={styles.historyMiniValue}>{formatNumber(today?.restingHr)} bpm</Text>
+              <View style={styles.miniSparkWrap}>
+                <Sparkline color={tokens.muted} data={[53, 51, 52, 50, 54, 55, today?.restingHr ?? 53]} />
+              </View>
+            </DataCard>
+          </View>
         </View>
 
-        <SectionLabel>Recent workouts</SectionLabel>
+        <SectionLabel>Imported from Strava</SectionLabel>
         <View style={styles.listCard}>
-          {snapshot.recentWorkouts.length ? (
-            snapshot.recentWorkouts.map((workout) => (
-              <WorkoutItem key={workout.workoutId} workout={workout} />
-            ))
+          {imported.length ? (
+            imported.map((workout) => <WorkoutItem key={workout.workoutId} workout={workout} />)
           ) : (
             <Text style={styles.emptyText}>No workouts imported yet.</Text>
           )}
         </View>
       </ScrollView>
+      <CoachDock plan={generateTrainingPlan(snapshot, 'run')} />
     </View>
   );
 }
@@ -1376,6 +1745,7 @@ function SourceScreen({
 function TabBar({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {
   const tabs: { id: Tab; label: string; icon: LucideIcon }[] = [
     { id: 'coach', label: 'Coach', icon: Sparkles },
+    { id: 'workout', label: 'Workout', icon: Dumbbell },
     { id: 'analytics', label: 'Analytics', icon: ChartColumn },
     { id: 'history', label: 'History', icon: History },
     { id: 'you', label: 'You', icon: User },
@@ -1612,12 +1982,14 @@ export default function App() {
             lastSync={lastSync}
             onChangeCoachDraft={setCoachDraft}
             onSendCoachMessage={submitCoachMessage}
+            onOpenWorkout={() => setActiveTab('workout')}
             onSync={runSync}
             snapshot={snapshot}
             status={status}
             warnings={warnings}
           />
         ) : null}
+        {activeTab === 'workout' ? <WorkoutPlanScreen snapshot={snapshot} /> : null}
         {activeTab === 'analytics' ? (
           <AnalyticsScreen lastSync={lastSync} snapshot={snapshot} />
         ) : null}
@@ -1668,7 +2040,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: 18,
-    paddingVertical: 10,
+    paddingTop: 8,
+    paddingBottom: 7,
   },
   topBarLeft: {
     alignItems: 'center',
@@ -1683,17 +2056,39 @@ const styles = StyleSheet.create({
   },
   topMeta: {
     color: tokens.muted,
-    fontSize: 11,
+    fontFamily: 'monospace',
+    fontSize: 10.5,
     letterSpacing: 0,
     marginTop: 1,
+  },
+  coachAvatarWrap: {
+    position: 'relative',
   },
   coachAvatar: {
     alignItems: 'center',
     backgroundColor: tokens.ink,
     justifyContent: 'center',
   },
+  coachAvatarText: {
+    color: tokens.surface,
+    fontFamily: tokens.serif,
+    fontStyle: 'italic',
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  coachOnlineDot: {
+    backgroundColor: tokens.positive,
+    borderColor: tokens.bg,
+    borderRadius: 5,
+    borderWidth: 2,
+    bottom: -1,
+    height: 9,
+    position: 'absolute',
+    right: -1,
+    width: 9,
+  },
   feed: {
-    gap: 14,
+    gap: 13,
     padding: 16,
     paddingBottom: 12,
   },
@@ -1701,40 +2096,41 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     color: tokens.muted,
     fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0,
+    fontWeight: '700',
+    letterSpacing: 2,
     textTransform: 'uppercase',
   },
   coachLine: {
-    alignItems: 'flex-end',
+    alignItems: 'flex-start',
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
+    maxWidth: '92%',
   },
   coachLineFirst: {
     marginTop: 2,
   },
-  coachBubble: {
-    backgroundColor: tokens.surface,
-    borderColor: tokens.lineSoft,
-    borderRadius: 8,
-    borderWidth: 1,
-    flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+  coachSpacer: {
+    flexShrink: 0,
+    width: 32,
   },
   coachText: {
-    color: tokens.inkSoft,
-    fontSize: 15,
+    color: tokens.ink,
+    flexShrink: 1,
+    fontFamily: tokens.serif,
+    fontSize: 18,
+    fontWeight: '400',
     letterSpacing: 0,
-    lineHeight: 22,
+    lineHeight: 25,
+    paddingHorizontal: 2,
+    paddingVertical: 3,
   },
   userBubble: {
     alignSelf: 'flex-end',
     backgroundColor: tokens.ink,
-    borderRadius: 8,
+    borderRadius: 18,
     maxWidth: '78%',
     paddingHorizontal: 14,
-    paddingVertical: 11,
+    paddingVertical: 9,
   },
   userText: {
     color: tokens.surface,
@@ -1750,6 +2146,12 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 14,
   },
+  dataCardInset: {
+    marginLeft: 42,
+  },
+  dataCardWithAccent: {
+    borderLeftWidth: 2,
+  },
   dataCardHeader: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -1764,13 +2166,26 @@ const styles = StyleSheet.create({
     color: tokens.muted,
     fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 0,
+    letterSpacing: 2,
     textTransform: 'uppercase',
   },
   recoveryRow: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 14,
+  },
+  sourceLine: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  sourceLineText: {
+    color: tokens.muted,
+    flexShrink: 1,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0,
   },
   recoveryCopy: {
     flex: 1,
@@ -1783,9 +2198,10 @@ const styles = StyleSheet.create({
   },
   readinessLabel: {
     color: tokens.ink,
+    fontFamily: tokens.serif,
     fontSize: 18,
     fontStyle: 'italic',
-    fontWeight: '700',
+    fontWeight: '500',
     letterSpacing: 0,
   },
   readinessMeta: {
@@ -1809,15 +2225,21 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
+  metricGridFull: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
   smallMetric: {
     backgroundColor: tokens.surfaceAlt,
     borderColor: tokens.lineSoft,
-    borderRadius: 8,
+    borderRadius: 4,
     borderWidth: 1,
-    minHeight: 56,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    width: '47.5%',
+    minHeight: 62,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexBasis: '47%',
+    flexGrow: 1,
   },
   smallMetricLabel: {
     color: tokens.muted,
@@ -1828,8 +2250,9 @@ const styles = StyleSheet.create({
   },
   smallMetricValue: {
     color: tokens.ink,
-    fontSize: 17,
-    fontWeight: '900',
+    fontFamily: tokens.serif,
+    fontSize: 22,
+    fontWeight: '400',
     letterSpacing: 0,
     marginTop: 4,
   },
@@ -1846,28 +2269,42 @@ const styles = StyleSheet.create({
   },
   planIcon: {
     alignItems: 'center',
-    backgroundColor: tokens.surfaceAlt,
-    borderColor: tokens.lineSoft,
-    borderRadius: 8,
-    borderWidth: 1,
-    height: 42,
+    backgroundColor: tokens.ink,
+    borderRadius: 99,
+    height: 38,
     justifyContent: 'center',
-    width: 42,
+    width: 38,
   },
   planCopy: {
     flex: 1,
   },
   planTitle: {
     color: tokens.ink,
-    fontSize: 20,
-    fontWeight: '900',
+    fontFamily: tokens.serif,
+    fontSize: 22,
+    fontWeight: '400',
     letterSpacing: 0,
+    lineHeight: 25,
   },
   planDetail: {
     color: tokens.muted,
     fontSize: 13,
     letterSpacing: 0,
     marginTop: 2,
+    lineHeight: 18,
+  },
+  coachPlanStats: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 7,
+  },
+  coachPlanStat: {
+    color: tokens.ink,
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0,
+    textTransform: 'capitalize',
   },
   effortChart: {
     backgroundColor: tokens.surfaceAlt,
@@ -1897,7 +2334,57 @@ const styles = StyleSheet.create({
     color: tokens.inkSoft,
     fontSize: 13,
     letterSpacing: 0,
-    lineHeight: 20,
+    lineHeight: 19,
+  },
+  contextRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between',
+  },
+  contextCopy: {
+    flex: 1,
+  },
+  contextTitle: {
+    color: tokens.ink,
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  contextText: {
+    color: tokens.muted,
+    fontSize: 11,
+    letterSpacing: 0,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  segmentRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  segmentButton: {
+    alignItems: 'center',
+    backgroundColor: tokens.surfaceAlt,
+    borderColor: tokens.lineSoft,
+    borderRadius: 99,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 32,
+    minWidth: 42,
+    paddingHorizontal: 9,
+  },
+  segmentButtonActive: {
+    backgroundColor: tokens.ink,
+    borderColor: tokens.ink,
+  },
+  segmentButtonText: {
+    color: tokens.inkSoft,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  segmentButtonTextActive: {
+    color: tokens.surface,
   },
   singleAction: {
     marginTop: 2,
@@ -1927,7 +2414,7 @@ const styles = StyleSheet.create({
   chip: {
     backgroundColor: tokens.surface,
     borderColor: tokens.line,
-    borderRadius: 8,
+    borderRadius: 99,
     borderWidth: 1,
     paddingHorizontal: 11,
     paddingVertical: 7,
@@ -1942,15 +2429,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: 8,
+    borderBottomColor: tokens.lineSoft,
+    borderBottomWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
   composerInput: {
     backgroundColor: tokens.surface,
     borderColor: tokens.line,
-    borderRadius: 8,
+    borderRadius: 99,
     borderWidth: 1,
+    color: tokens.ink,
     flex: 1,
+    fontSize: 14,
     minHeight: 42,
     justifyContent: 'center',
     paddingHorizontal: 14,
@@ -1993,6 +2484,35 @@ const styles = StyleSheet.create({
     gap: 14,
     padding: 18,
     paddingBottom: 28,
+  },
+  workoutTopBar: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
+  roundIconButton: {
+    alignItems: 'center',
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 99,
+    borderWidth: 1,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  workoutContent: {
+    gap: 14,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 112,
+  },
+  workoutIntro: {
+    color: tokens.muted,
+    fontSize: 12,
+    letterSpacing: 0,
   },
   summaryGrid: {
     flexDirection: 'row',
@@ -2078,6 +2598,385 @@ const styles = StyleSheet.create({
     fontSize: 12,
     letterSpacing: 0,
     marginTop: 2,
+  },
+  workoutWelcome: {
+    color: tokens.ink,
+    fontFamily: tokens.serif,
+    fontSize: 29,
+    fontWeight: '400',
+    letterSpacing: 0,
+    lineHeight: 34,
+  },
+  workoutSubcopy: {
+    color: tokens.muted,
+    fontSize: 14,
+    letterSpacing: 0,
+    lineHeight: 21,
+  },
+  workoutMetaRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  capturePill: {
+    backgroundColor: tokens.accentSoft,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  capturePillText: {
+    color: tokens.accentDeep,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0,
+    textTransform: 'uppercase',
+  },
+  capturePanel: {
+    backgroundColor: tokens.surfaceAlt,
+    borderRadius: 4,
+    gap: 5,
+    paddingHorizontal: 13,
+    paddingVertical: 12,
+  },
+  captureTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  captureTitle: {
+    color: tokens.ink,
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  effortHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: -28,
+  },
+  effortMeta: {
+    color: tokens.muted,
+    fontSize: 12,
+    letterSpacing: 0,
+  },
+  effortChartLarge: {
+    height: 86,
+    justifyContent: 'center',
+  },
+  durationBadge: {
+    color: tokens.ink,
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  metricTags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7,
+  },
+  metricTag: {
+    backgroundColor: tokens.surfaceAlt,
+    borderColor: tokens.lineSoft,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  metricTagText: {
+    color: tokens.inkSoft,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  planDayRow: {
+    alignItems: 'center',
+    borderBottomColor: tokens.lineSoft,
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 68,
+    paddingHorizontal: 12,
+  },
+  planDayRowActive: {
+    backgroundColor: tokens.surfaceAlt,
+  },
+  planDayLabel: {
+    alignItems: 'center',
+    minWidth: 46,
+  },
+  planDayText: {
+    color: tokens.muted,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0,
+    textTransform: 'uppercase',
+  },
+  coachDock: {
+    backgroundColor: tokens.bg,
+    borderTopColor: tokens.lineSoft,
+    borderTopWidth: 1,
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  coachDockHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  coachDockTitle: {
+    color: tokens.ink,
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  coachDockMessages: {
+    gap: 7,
+  },
+  coachDockMessage: {
+    alignSelf: 'flex-start',
+    backgroundColor: tokens.surfaceAlt,
+    borderColor: tokens.lineSoft,
+    borderRadius: 8,
+    borderWidth: 1,
+    maxWidth: '90%',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  coachDockMessageUser: {
+    alignSelf: 'flex-end',
+    backgroundColor: tokens.ink,
+    borderColor: tokens.ink,
+  },
+  coachDockMessageText: {
+    color: tokens.inkSoft,
+    fontSize: 13,
+    letterSpacing: 0,
+    lineHeight: 18,
+  },
+  coachDockMessageTextUser: {
+    color: tokens.surface,
+    fontWeight: '800',
+  },
+  coachDockInputRow: {
+    alignItems: 'center',
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 99,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    paddingLeft: 12,
+    paddingRight: 4,
+  },
+  coachDockInput: {
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    color: tokens.ink,
+    flex: 1,
+    fontSize: 14,
+    minHeight: 42,
+    paddingHorizontal: 0,
+  },
+  coachDockSend: {
+    alignItems: 'center',
+    backgroundColor: tokens.ink,
+    borderRadius: 99,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  coachDockCollapse: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderWidth: 1,
+  },
+  coachBubbleButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    backgroundColor: tokens.ink,
+    borderRadius: 8,
+    height: 46,
+    justifyContent: 'center',
+    width: 46,
+  },
+  workoutActions: {
+    backgroundColor: tokens.bg,
+    borderTopColor: tokens.lineSoft,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  startWatchButton: {
+    alignItems: 'center',
+    backgroundColor: tokens.ink,
+    borderRadius: 14,
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    height: 50,
+    justifyContent: 'center',
+  },
+  startWatchText: {
+    color: tokens.surface,
+    fontSize: 15,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  scheduleButton: {
+    alignItems: 'center',
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 14,
+    borderWidth: 1,
+    flex: 0.75,
+    height: 50,
+    justifyContent: 'center',
+  },
+  scheduleText: {
+    color: tokens.ink,
+    fontSize: 15,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  historySignalContent: {
+    gap: 14,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 18,
+  },
+  historyWindow: {
+    color: tokens.muted,
+    fontSize: 13,
+    letterSpacing: 0,
+  },
+  historyTitle: {
+    color: tokens.ink,
+    fontFamily: tokens.serif,
+    fontSize: 28,
+    fontWeight: '400',
+    letterSpacing: 0,
+    lineHeight: 30,
+    marginTop: -12,
+  },
+  historyTitleItalic: {
+    fontStyle: 'italic',
+  },
+  signalTabs: {
+    flexDirection: 'row',
+    gap: 7,
+    marginTop: 4,
+  },
+  signalTab: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 99,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  signalTabActive: {
+    backgroundColor: tokens.ink,
+    borderColor: tokens.ink,
+  },
+  signalTabText: {
+    color: tokens.muted,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  signalTabTextActive: {
+    color: tokens.surface,
+  },
+  signalChart: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 16,
+  },
+  signalChartHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  signalValueLine: {
+    alignItems: 'baseline',
+    flexDirection: 'row',
+    gap: 4,
+    marginTop: 2,
+  },
+  signalValue: {
+    color: tokens.ink,
+    fontFamily: tokens.serif,
+    fontSize: 32,
+    fontWeight: '400',
+    letterSpacing: 0,
+  },
+  signalUnit: {
+    color: tokens.inkSoft,
+    fontSize: 13,
+    letterSpacing: 0,
+  },
+  signalBaseline: {
+    alignItems: 'flex-end',
+  },
+  signalBaselineText: {
+    color: tokens.muted,
+    fontSize: 12,
+    letterSpacing: 0,
+  },
+  signalDelta: {
+    color: tokens.positive,
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
+    marginTop: 3,
+  },
+  signalDays: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginHorizontal: 1,
+    marginTop: -10,
+  },
+  signalDayText: {
+    color: tokens.inkSoft,
+    fontSize: 12,
+    letterSpacing: 0,
+  },
+  historyMiniGrid: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  historyMiniColumn: {
+    flex: 1,
+  },
+  historyMiniValue: {
+    color: tokens.ink,
+    fontFamily: tokens.serif,
+    fontSize: 25,
+    fontWeight: '400',
+    letterSpacing: 0,
+  },
+  sleepBars: {
+    alignItems: 'flex-end',
+    flexDirection: 'row',
+    gap: 5,
+    height: 38,
+    marginTop: 10,
+  },
+  sleepBar: {
+    backgroundColor: '#b6c5d3',
+    borderRadius: 2,
+    flex: 1,
+  },
+  miniSparkWrap: {
+    height: 38,
+    justifyContent: 'center',
+    marginTop: 8,
   },
   emptyText: {
     color: tokens.muted,

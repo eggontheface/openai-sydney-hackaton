@@ -25,6 +25,7 @@
 <script type="text/babel" src="design-canvas.jsx"></script>
 <script type="text/babel" src="tweaks-panel.jsx"></script>
 <script type="text/babel" src="tokens.jsx"></script>
+<script src="coach-engine.js"></script>
 <script type="text/babel" src="primitives.jsx"></script>
 <script type="text/babel" src="chat-primitives.jsx"></script>
 <script type="text/babel" src="screens-setup.jsx"></script>
@@ -46,16 +47,15 @@ const tokens = window.DIRECTIONS.B; // locked to Quiet Data
 function PrototypeApp({ persona = 'steady', goal = 'run' }) {
   const personaData = window.PERSONAS[persona];
   const [tab, setTab] = React.useState('coach');
-  const [overlay, setOverlay] = React.useState(null);
 
   return (
     <PhoneShell tokens={tokens} bg={tokens.bg}>
-      {overlay === 'workout' && <WorkoutScreen tokens={tokens} persona={personaData} onBack={() => setOverlay(null)}/>}
-      {!overlay && tab === 'coach' && (
-        <CoachHome tokens={tokens} persona={personaData} goal={goal} onTab={setTab} active="coach" onOpenWorkout={() => setOverlay('workout')}/>
+      {tab === 'coach' && (
+        <CoachHome tokens={tokens} persona={personaData} goal={goal} onTab={setTab} active="coach" onOpenWorkout={() => setTab('workout')}/>
       )}
-      {!overlay && tab === 'history' && <HistoryScreenWrapped persona={personaData} onTab={setTab}/>}
-      {!overlay && tab === 'profile' && <ProfileScreenWrapped persona={personaData} goal={goal} onTab={setTab}/>}
+      {tab === 'workout' && <WorkoutScreen tokens={tokens} persona={personaData} goal={goal} active="workout" onTab={setTab}/>}
+      {tab === 'history' && <HistoryScreenWrapped persona={personaData} onTab={setTab}/>}
+      {tab === 'profile' && <ProfileScreenWrapped persona={personaData} goal={goal} onTab={setTab}/>}
     </PhoneShell>
   );
 }
