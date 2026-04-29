@@ -23,6 +23,7 @@ import type {
   CanonicalType,
   HealthConnectReadDiagnostic,
   HealthSample,
+  HrvMethod,
   NutritionDailyRecord,
   SleepSessionRecord,
   SportBucket,
@@ -42,6 +43,7 @@ type HealthKitReadConfig = {
 type HealthKitQuantityConfig = HealthKitReadConfig & {
   identifier: QuantityTypeIdentifier;
   unit: string;
+  hrvMethod?: HrvMethod;
   nutritionField?: NutritionNumberField;
   nutrientKey?: string;
   metadata?: Record<string, unknown>;
@@ -140,8 +142,10 @@ const quantityConfigs: HealthKitQuantityConfig[] = [
     canonicalType: 'hrv_sdnn',
     readKind: 'records',
     unit: 'ms',
+    hrvMethod: 'sdnn',
     metadata: {
-      hrvMethod: 'SDNN',
+      hrvMethod: 'sdnn',
+      hrvMethodLabel: 'SDNN',
       hrvMethodSource: 'Apple HealthKit heartRateVariabilitySDNN',
     },
   },
@@ -377,6 +381,7 @@ function quantitySample(
     localDate: localDateKey(record.startDate),
     value: numeric(record.quantity),
     unit: record.unit ?? config.unit,
+    hrvMethod: config.hrvMethod,
     metadataJson: metadataJson(record, {
       quantityIdentifier: config.identifier,
       ...config.metadata,

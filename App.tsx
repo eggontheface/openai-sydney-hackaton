@@ -56,6 +56,7 @@ import type {
   CanonicalType,
   DailyMetrics,
   HealthConnectReadDiagnostic,
+  HrvMethod,
   MetricAvailability,
   PipelineSnapshot,
   SourceFreshness,
@@ -179,7 +180,7 @@ const analyticsMetrics: AnalyticsMetricConfig[] = [
   {
     id: 'hrv',
     title: 'HRV',
-    detail: 'RMSSD or Apple SDNN',
+    detail: 'Method-specific RMSSD or SDNN',
     types: ['hrv_rmssd', 'hrv_sdnn'],
     icon: HeartPulse,
     gap: 'Connect a source that writes HRV to Health Connect or Apple Health.',
@@ -260,6 +261,17 @@ function formatNumber(value?: number, digits = 0): string {
   });
 }
 
+function hrvMethodLabel(method?: HrvMethod): string {
+  if (method === 'rmssd') return 'RMSSD';
+  if (method === 'sdnn') return 'SDNN';
+  return 'HRV';
+}
+
+function hrvMetricLabel(day?: DailyMetrics | null): string {
+  const method = hrvMethodLabel(day?.hrvMethod);
+  return day?.hrvLastNightAvg == null || method === 'HRV' ? 'HRV' : `HRV ${method}`;
+}
+
 function formatDateKey(date?: string): string {
   if (!date) {
     return formatDisplayDate(new Date());
@@ -275,7 +287,7 @@ function metricLabel(type: CanonicalType): string {
     distance: 'Distance',
     heart_rate: 'Heart rate',
     hydration: 'Hydration',
-    hrv_rmssd: 'HRV',
+    hrv_rmssd: 'HRV RMSSD',
     hrv_sdnn: 'HRV SDNN',
     lean_body_mass: 'Lean mass',
     nutrition: 'Nutrition',
@@ -555,6 +567,7 @@ function CoachScreen({
   const plan = useMemo(() => generateTrainingPlan(snapshot, 'run'), [snapshot]);
   const sleep = current?.sleepSeconds ? formatDuration(current.sleepSeconds) : '—';
   const hrv = current?.hrvLastNightAvg ? `${Math.round(current.hrvLastNightAvg)} ms` : '—';
+  const hrvLabel = hrvMetricLabel(current);
   const rhr = current?.restingHr ? `${Math.round(current.restingHr)} bpm` : '—';
   const quickReplies = ['Make it easier', 'Move it to tomorrow', "I'm short on time"];
   const canSendCoachMessage = hasOpenAiApiKey && !coachBusy && Boolean(coachDraft.trim());
@@ -620,7 +633,7 @@ function CoachScreen({
           <View style={styles.metricGridFull}>
             <SmallMetric label="Sleep" value={sleep} />
             <SmallMetric label="Score" value={formatNumber(recommendation.readiness ?? undefined)} />
-            <SmallMetric label="HRV" value={hrv.replace(' ms', '')} />
+            <SmallMetric label={hrvLabel} value={hrv.replace(' ms', '')} />
             <SmallMetric label="RHR" value={rhr.replace(' bpm', '')} />
           </View>
           <Text style={styles.helpText}>{recommendation.reason}</Text>
@@ -1076,12 +1089,34 @@ function WorkoutItem({ workout }: { workout: WorkoutRecord }) {
 }
 
 function SignalTrendChart({ history }: { history: DailyMetrics[] }) {
-  const values = history
-    .slice()
-    .reverse()
-    .slice(-7)
-    .map((day) => day.hrvLastNightAvg ?? day.restingHr ?? 0);
-  const labels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  const chronological = history.slice().reverse();
+  const hrvDays = chronological.filter((day) => day.hrvLastNightAvg != null);
+  const latestHrvDay = hrvDays[hrvDays.length - 1];
+  const compatibleDays = latestHrvDay
+    ? chronological.filter((day) => {
+        if (day.hrvLastNightAvg == null || day.hrvMethod !== latestHrvDay.hrvMethod) {
+          return false;
+        }
+        if (
+          day.hrvCanonicalType &&
+          latestHrvDay.hrvCanonicalType &&
+          day.hrvCanonicalType !== latestHrvDay.hrvCanonicalType
+        ) {
+          return false;
+        }
+
+        if (day.hrvSourceKey || latestHrvDay.hrvSourceKey) {
+          return day.hrvSourceKey === latestHrvDay.hrvSourceKey;
+        }
+
+        return true;
+      })
+    : [];
+  const chartDays = compatibleDays.slice(-7);
+  const values = chartDays.map((day) => day.hrvLastNightAvg ?? 0);
+  const labels = chartDays.map((day) =>
+    new Date(`${day.date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 1),
+  );
   const max = Math.max(...values, 1);
   const min = Math.min(...values, 0);
   const range = max - min || 1;
@@ -1091,26 +1126,37 @@ function SignalTrendChart({ history }: { history: DailyMetrics[] }) {
     return [x, y];
   });
   const line = points.map(([x, y], index) => `${index === 0 ? 'M' : 'L'}${x},${y}`).join(' ');
+  const latestValue = values[values.length - 1];
+  const baselineValues = values.slice(0, -1);
+  const baseline = baselineValues.length
+    ? baselineValues.reduce((sum, value) => sum + value, 0) / baselineValues.length
+    : undefined;
+  const delta = latestValue != null && baseline != null ? latestValue - baseline : undefined;
+  const sectionTitle = `${hrvMetricLabel(latestHrvDay)} · 7-day`;
 
   return (
     <View style={styles.signalChart}>
       <View style={styles.signalChartHeader}>
         <View>
-          <SectionLabel>HRV · 7-day</SectionLabel>
+          <SectionLabel>{sectionTitle}</SectionLabel>
           <View style={styles.signalValueLine}>
-            <Text style={styles.signalValue}>{formatNumber(values[values.length - 1], 0)}</Text>
+            <Text style={styles.signalValue}>{formatNumber(latestValue, 0)}</Text>
             <Text style={styles.signalUnit}>ms</Text>
           </View>
         </View>
         <View style={styles.signalBaseline}>
           <Text style={styles.signalBaselineText}>vs baseline</Text>
-          <Text style={styles.signalDelta}>+2 ms</Text>
+          <Text style={styles.signalDelta}>
+            {delta == null ? '—' : `${delta > 0 ? '+' : ''}${formatNumber(delta, 0)} ms`}
+          </Text>
         </View>
       </View>
       <Svg height={150} width="100%" viewBox="0 0 300 150" preserveAspectRatio="none">
         <Rect fill={tokens.surfaceAlt} height={82} width={264} x={18} y={44} />
         <Path d="M18,86 L282,86" stroke={tokens.line} strokeDasharray="4 4" strokeWidth={1.4} />
-        <Path d={line} fill="none" stroke={tokens.cool} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.4} />
+        {line ? (
+          <Path d={line} fill="none" stroke={tokens.cool} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.4} />
+        ) : null}
         {points.map(([x, y], index) => (
           <Circle cx={x} cy={y} fill={tokens.cool} key={`${x}-${y}-${index}`} r={3} />
         ))}
