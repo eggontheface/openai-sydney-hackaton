@@ -1122,6 +1122,9 @@ async function ensureHrvSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     END
     WHERE hrv_method IS NULL
       AND canonical_type IN ('hrv_rmssd', 'hrv_sdnn');
+
+    CREATE INDEX IF NOT EXISTS idx_health_samples_hrv_method
+      ON health_samples(hrv_method, canonical_type, local_date);
   `);
 }
 
@@ -1151,9 +1154,6 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_health_samples_platform_time
       ON health_samples(platform, start_at);
-
-    CREATE INDEX IF NOT EXISTS idx_health_samples_hrv_method
-      ON health_samples(hrv_method, canonical_type, local_date);
 
     CREATE TABLE IF NOT EXISTS sleep_sessions (
       sleep_id TEXT PRIMARY KEY NOT NULL,
