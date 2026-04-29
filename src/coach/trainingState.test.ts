@@ -138,6 +138,36 @@ describe("training state classifier", () => {
     expect(state.recommendedBehavior).toBe("normal_progression");
   });
 
+  it.each(["no pain today", "doctor cleared me"])(
+    "does not classify non-limiting check-in text as currently limited: %s",
+    (text) => {
+      const state = classifyTrainingState({
+        asOfDate,
+        workouts: [workout(2), workout(9), workout(16), workout(23)],
+        checkIns: [{ source: "daily_check_in", text }],
+      });
+
+      expect(state.state).toBe("consistent_recreational_athlete");
+      expect(state.recommendedBehavior).toBe("normal_progression");
+    },
+  );
+
+  it.each(["sharp pain in my knee", "doctor told me not to train"])(
+    "classifies direct limiting check-in text as currently limited: %s",
+    (text) => {
+      const state = classifyTrainingState({
+        asOfDate,
+        workouts: [workout(2), workout(9), workout(16), workout(23)],
+        checkIns: [{ source: "daily_check_in", text }],
+      });
+
+      expect(state.state).toBe("currently_limited");
+      expect(state.recommendedBehavior).toBe(
+        "recovery_or_professional_guidance",
+      );
+    },
+  );
+
   it("classifies blocking risk flags as currently limited even with advanced recent activity", () => {
     const state = classifyTrainingState({
       asOfDate,

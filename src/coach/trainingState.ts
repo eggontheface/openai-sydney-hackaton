@@ -47,8 +47,20 @@ const firstTimePatterns = [
 ];
 
 const limitedPatterns = [
-  /\b(injur(y|ed)|pain|sick|ill|fever|limited|doctor|clinician)\b/i,
-  /\b(recovering from|can't train|cannot train)\b/i,
+  /\b(injur(y|ed)|fever|limited by|limitation(s)? from)\b/i,
+  /\b(sharp|severe|worsening|significant)\s+pain\b/i,
+  /\bpain\b.{0,32}\b(sharp|severe|worsening|significant|limiting|stopping me)\b/i,
+  /\b(sick|ill)\b.{0,32}\b(today|still|currently|now)\b/i,
+  /\b(recovering from|can't train|cannot train|not able to train|unable to train)\b/i,
+  /\b(doctor|clinician)\b.{0,40}\b(told|said|advised)\b.{0,40}\b(not to train|avoid training|stop training|rest)\b/i,
+];
+
+const nonLimitingPatterns = [
+  /\b(no|without|zero)\s+(pain|limitations?|injur(y|ies)|fever)\b/i,
+  /\bnot\s+(sick|ill|injured|limited)\b/i,
+  /\b(sick|ill|injured)\b.{0,24}\b(anymore|now gone|resolved)\b/i,
+  /\b(doctor|clinician)\b.{0,32}\b(cleared|approved|okayed|signed off)\b/i,
+  /\bcleared\s+(to train|for training|for exercise|by (my )?(doctor|clinician))\b/i,
 ];
 
 const severityRank: Record<RiskFlagSeverity, number> = {
@@ -152,6 +164,16 @@ function hasPattern(
   );
 }
 
+function hasLimitedCheckIn(checkIns: readonly TrainingStateCheckIn[]): boolean {
+  return checkIns.some((checkIn) => {
+    if (nonLimitingPatterns.some((pattern) => pattern.test(checkIn.text))) {
+      return false;
+    }
+
+    return limitedPatterns.some((pattern) => pattern.test(checkIn.text));
+  });
+}
+
 function hasLimitedRisk(riskFlags?: RiskFlags | null): boolean {
   if (!riskFlags) {
     return false;
@@ -223,10 +245,7 @@ export function classifyTrainingState(
     signalsUsed.push("risk flags");
   }
 
-  if (
-    hasLimitedRisk(input.riskFlags) ||
-    hasPattern(checkIns, limitedPatterns)
-  ) {
+  if (hasLimitedRisk(input.riskFlags) || hasLimitedCheckIn(checkIns)) {
     return buildClassification(
       "currently_limited",
       0.85,
