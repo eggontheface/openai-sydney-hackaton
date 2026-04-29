@@ -17,6 +17,7 @@ import {
   type PrimaryGoal,
   type StartingStrategy,
 } from "../goals/goalProfile";
+import { buildPipelineExportArtifacts } from "../export/pipelineExport";
 import { formatDuration, localDateKey } from "../lib/dates";
 import { safeJsonStringify } from "../lib/json";
 import {
@@ -139,6 +140,11 @@ export type SyncRunDetails = {
   nutritionDayCount?: number;
   warningCount?: number;
   diagnosticCount?: number;
+};
+
+export type PipelineExportResult = {
+  jsonFileUri: string;
+  healthCheckFileUri: string;
 };
 
 type HealthConnectDiagnosticRow = {
@@ -2601,7 +2607,8 @@ function deriveRecommendation(
   let readiness = 56;
   const signals: string[] = [];
   const freshnessGaps = recommendationFreshnessGaps(sourceFreshness);
-  const trainingLoadBoundary = recommendationBoundaryForTrainingLoad(trainingLoad);
+  const trainingLoadBoundary =
+    recommendationBoundaryForTrainingLoad(trainingLoad);
 
   if (current.sleepSeconds != null) {
     if (sleepHours >= 7.5) {
@@ -2839,7 +2846,12 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
         sourceModifiedAt: row.source_modified_at ?? undefined,
       })),
       trainingLoad,
-      recommendation: deriveRecommendation(today, history, sourceFreshness, trainingLoad),
+      recommendation: deriveRecommendation(
+        today,
+        history,
+        sourceFreshness,
+        trainingLoad,
+      ),
     };
   });
 }
@@ -3094,7 +3106,9 @@ export async function clearPipeline(): Promise<void> {
   });
 }
 
-export async function exportPipelineJson(): Promise<string> {
+export async function exportPipelineArtifacts(): Promise<PipelineExportResult> {
+  const pipelineSnapshot = await getPipelineSnapshot();
+
   return withStorageLock(async () => {
     const db = await getDb();
     const samples = await db.getAllAsync<HealthSampleRow>(
@@ -3122,16 +3136,14 @@ export async function exportPipelineJson(): Promise<string> {
     const goalProfileRow = await db.getFirstAsync<GoalProfileRow>(
       "SELECT * FROM goal_profile WHERE id = 'current' LIMIT 1",
     );
-    const exportedAt = new Date().toISOString();
+    const exportArtifacts = buildPipelineExportArtifacts(pipelineSnapshot);
+    const exportedAt = exportArtifacts.exportedAt;
     const goalProfile = goalProfileRow ? toGoalProfile(goalProfileRow) : null;
     const riskFlags = extractRiskFlagsFromCoachRequest({
       generated_at: exportedAt,
       goal_profile: goalProfile ?? undefined,
     });
 
-    const trainingLoad = buildCurrentTrainingLoadSnapshot(
-      dedupeWorkoutRows(workouts).length,
-    );
     const payload = {
       schema: "biostream_training_pipeline.v5",
       exportedAt,
@@ -3145,7 +3157,7 @@ export async function exportPipelineJson(): Promise<string> {
       diagnostics,
       goalProfile,
       riskFlags,
-      trainingLoad: toTrainingLoadExport(trainingLoad),
+      trainingLoad: toTrainingLoadExport(pipelineSnapshot.trainingLoad),
     };
 
     const directory = FileSystem.documentDirectory;
@@ -3155,18 +3167,37 @@ export async function exportPipelineJson(): Promise<string> {
       );
     }
 
-    const fileUri = `${directory}biostream-pipeline-${Date.now()}.json`;
-    await FileSystem.writeAsStringAsync(fileUri, safeJsonStringify(payload), {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
+    const jsonFileUri = `${directory}${exportArtifacts.jsonFileName}`;
+    const healthCheckFileUri = `${directory}${exportArtifacts.healthCheckFileName}`;
+    await Promise.all([
+      FileSystem.writeAsStringAsync(jsonFileUri, safeJsonStringify(payload), {
+        encoding: FileSystem.EncodingType.UTF8,
+      }),
+      FileSystem.writeAsStringAsync(
+        healthCheckFileUri,
+        exportArtifacts.healthCheckMarkdown,
+        {
+          encoding: FileSystem.EncodingType.UTF8,
+        },
+      ),
+    ]);
 
     if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(fileUri, {
+      await Sharing.shareAsync(jsonFileUri, {
         mimeType: "application/json",
         dialogTitle: "Export BioStream pipeline JSON",
       });
+      await Sharing.shareAsync(healthCheckFileUri, {
+        mimeType: "text/markdown",
+        dialogTitle: "Export BioStream health_check.md",
+      });
     }
 
-    return fileUri;
+    return { jsonFileUri, healthCheckFileUri };
   });
+}
+
+export async function exportPipelineJson(): Promise<string> {
+  const result = await exportPipelineArtifacts();
+  return result.jsonFileUri;
 }
