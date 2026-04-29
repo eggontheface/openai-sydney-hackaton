@@ -174,10 +174,43 @@ export function CoachScreen({
         ref={feedRef}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.dateDivider}>This morning</Text>
-        <CoachLine first>{coachGreeting}</CoachLine>
+        <View style={styles.coachHero}>
+          <View style={styles.coachHeroTop}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.coachHeroTitle}>
+                Good morning, {athleteName}.
+              </Text>
+              <Text style={styles.coachHeroText}>
+                {coachGreeting.replace(`Good morning ${athleteName}. `, "")}
+              </Text>
+            </View>
+            <View style={styles.coachHeroBadge}>
+              <Text style={styles.coachHeroBadgeText}>
+                {recommendation.readinessLabel}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.coachHeroMetrics}>
+            <View style={styles.coachHeroMetric}>
+              <Text style={styles.coachHeroMetricLabel}>Sleep</Text>
+              <Text style={styles.coachHeroMetricValue}>{sleep}</Text>
+            </View>
+            <View style={styles.coachHeroMetric}>
+              <Text style={styles.coachHeroMetricLabel}>{hrvLabel}</Text>
+              <Text style={styles.coachHeroMetricValue}>
+                {hrv.replace(" ms", "")}
+              </Text>
+            </View>
+            <View style={styles.coachHeroMetric}>
+              <Text style={styles.coachHeroMetricLabel}>RHR</Text>
+              <Text style={styles.coachHeroMetricValue}>
+                {rhr.replace(" bpm", "")}
+              </Text>
+            </View>
+          </View>
+        </View>
 
-        <DataCard accent={accent} inset label="Sleep & recovery">
+        <DataCard accent={accent} label="Sleep & recovery">
           <View style={styles.sourceLine}>
             <Text style={styles.sourceLineText}>
               {loadingInitialMetrics
@@ -220,7 +253,7 @@ export function CoachScreen({
         </DataCard>
 
         <Pressable accessibilityRole="button" onPress={onOpenWorkout}>
-          <DataCard accent={tokens.ink} inset label="Today's workout">
+          <DataCard accent={tokens.accent} label="Today's workout">
             <View style={styles.planHeader}>
               <View style={styles.planIcon}>
                 <Activity color={tokens.surface} size={18} strokeWidth={2} />
@@ -263,7 +296,7 @@ export function CoachScreen({
         ) : null}
 
         {!hasSyncedData ? (
-          <DataCard accent={tokens.accent} inset label="Datasource">
+          <DataCard accent={tokens.accent} label="Datasource">
             <Text style={styles.helpText}>
               {sourceLabel} is the source of truth. Syncing creates raw schema
               rows, then derives daily coaching metrics locally on this device.
@@ -314,14 +347,14 @@ export function CoachScreen({
           <TextInput
             accessibilityLabel="Ask your coach"
             autoCorrect
-            cursorColor={tokens.ink}
+            cursorColor={tokens.accent}
             editable={!coachInputDisabled}
             onChangeText={onChangeCoachDraft}
             onSubmitEditing={() => onSendCoachMessage()}
             placeholder={composerPlaceholder}
             placeholderTextColor={tokens.muted}
             returnKeyType="send"
-            selectionColor={tokens.ink}
+            selectionColor={tokens.accent}
             style={styles.composerTextInput}
             value={coachDraft}
           />

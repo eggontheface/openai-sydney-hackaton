@@ -24,6 +24,7 @@ export const styles = StyleSheet.create({
     backgroundColor: tokens.bg,
   },
   splashScreen: {
+    alignItems: "stretch",
     backgroundColor: tokens.bg,
     flex: 1,
     justifyContent: "center",
@@ -49,23 +50,26 @@ export const styles = StyleSheet.create({
     lineHeight: 22,
   },
   splashActions: {
+    alignSelf: "stretch",
     gap: 12,
+    maxWidth: "100%",
   },
   splashOption: {
     alignItems: "center",
     backgroundColor: tokens.surface,
     borderColor: tokens.line,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1,
     flexDirection: "row",
     gap: 12,
     minHeight: 88,
+    overflow: "hidden",
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
   splashOptionPrimary: {
-    backgroundColor: tokens.ink,
-    borderColor: tokens.ink,
+    backgroundColor: tokens.accentDeep,
+    borderColor: tokens.accentDeep,
   },
   splashOptionIcon: {
     alignItems: "center",
@@ -76,11 +80,13 @@ export const styles = StyleSheet.create({
     width: 42,
   },
   splashOptionIconPrimary: {
-    backgroundColor: tokens.inkSoft,
+    backgroundColor: "rgba(255,255,255,0.12)",
   },
   splashOptionCopy: {
     flex: 1,
+    flexShrink: 1,
     gap: 3,
+    minWidth: 0,
   },
   splashOptionTitle: {
     color: tokens.ink,
@@ -93,12 +99,14 @@ export const styles = StyleSheet.create({
   },
   splashOptionText: {
     color: tokens.muted,
+    flexShrink: 1,
+    flexWrap: "wrap",
     fontSize: 13,
     letterSpacing: 0,
     lineHeight: 18,
   },
   splashOptionTextPrimary: {
-    color: tokens.bgDeep,
+    color: "#dbe9de",
   },
   startLoadingContent: {
     alignItems: "center",
@@ -137,7 +145,7 @@ export const styles = StyleSheet.create({
     height: 5,
   },
   onboardingProgressDotActive: {
-    backgroundColor: tokens.ink,
+    backgroundColor: tokens.accent,
   },
   onboardingThreadBlock: {
     gap: 8,
@@ -158,6 +166,10 @@ export const styles = StyleSheet.create({
     minHeight: 68,
     paddingHorizontal: 14,
     paddingVertical: 11,
+    shadowColor: tokens.accentDeep,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
   },
   setupOptionTitle: {
     color: tokens.ink,
@@ -194,13 +206,12 @@ export const styles = StyleSheet.create({
   },
   topBar: {
     alignItems: "center",
-    borderBottomColor: tokens.lineSoft,
-    borderBottomWidth: 1,
+    backgroundColor: tokens.bg,
     flexDirection: "row",
     justifyContent: "space-between",
     paddingHorizontal: 18,
-    paddingTop: 8,
-    paddingBottom: 7,
+    paddingTop: 10,
+    paddingBottom: 9,
   },
   topBarLeft: {
     alignItems: "center",
@@ -225,7 +236,7 @@ export const styles = StyleSheet.create({
   },
   coachAvatar: {
     alignItems: "center",
-    backgroundColor: tokens.ink,
+    backgroundColor: tokens.accent,
     justifyContent: "center",
   },
   coachAvatarText: {
@@ -247,9 +258,84 @@ export const styles = StyleSheet.create({
     width: 9,
   },
   feed: {
-    gap: 13,
+    gap: 14,
     padding: 16,
     paddingBottom: 12,
+  },
+  coachHero: {
+    backgroundColor: tokens.accent,
+    borderRadius: 18,
+    gap: 14,
+    overflow: "hidden",
+    padding: 18,
+    shadowColor: tokens.accentDeep,
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.18,
+    shadowRadius: 22,
+  },
+  coachHeroTop: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+  },
+  coachHeroTitle: {
+    color: tokens.surface,
+    fontFamily: tokens.serif,
+    fontSize: 32,
+    fontWeight: "400",
+    letterSpacing: 0,
+    lineHeight: 35,
+  },
+  coachHeroText: {
+    color: "#dbe9de",
+    fontSize: 14,
+    letterSpacing: 0,
+    lineHeight: 20,
+    marginTop: 8,
+  },
+  coachHeroBadge: {
+    backgroundColor: "rgba(255,255,255,0.13)",
+    borderColor: "rgba(255,255,255,0.22)",
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  coachHeroBadgeText: {
+    color: tokens.surface,
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0,
+    textTransform: "uppercase",
+  },
+  coachHeroMetrics: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  coachHeroMetric: {
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderColor: "rgba(255,255,255,0.14)",
+    borderRadius: 10,
+    borderWidth: 1,
+    flex: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+  coachHeroMetricLabel: {
+    color: "#b9d1c1",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0,
+    textTransform: "uppercase",
+  },
+  coachHeroMetricValue: {
+    color: tokens.surface,
+    fontFamily: tokens.serif,
+    fontSize: 22,
+    fontWeight: "400",
+    letterSpacing: 0,
+    marginTop: 3,
   },
   dateDivider: {
     alignSelf: "center",
@@ -292,7 +378,7 @@ export const styles = StyleSheet.create({
   },
   userBubble: {
     alignSelf: "flex-end",
-    backgroundColor: tokens.ink,
+    backgroundColor: tokens.accent,
     borderRadius: 18,
     maxWidth: "78%",
     paddingHorizontal: 14,
@@ -311,6 +397,10 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     gap: 12,
     padding: 14,
+    shadowColor: tokens.accentDeep,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.04,
+    shadowRadius: 14,
   },
   dataCardInset: {
     marginLeft: 42,
@@ -397,9 +487,9 @@ export const styles = StyleSheet.create({
     gap: 10,
   },
   smallMetric: {
-    backgroundColor: tokens.surfaceAlt,
+    backgroundColor: tokens.accentWash,
     borderColor: tokens.lineSoft,
-    borderRadius: 4,
+    borderRadius: 8,
     borderWidth: 1,
     minHeight: 62,
     paddingHorizontal: 12,
@@ -441,7 +531,7 @@ export const styles = StyleSheet.create({
   },
   planIcon: {
     alignItems: "center",
-    backgroundColor: tokens.ink,
+    backgroundColor: tokens.accent,
     borderRadius: 99,
     height: 38,
     justifyContent: "center",
@@ -546,8 +636,8 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 9,
   },
   segmentButtonActive: {
-    backgroundColor: tokens.ink,
-    borderColor: tokens.ink,
+    backgroundColor: tokens.accent,
+    borderColor: tokens.accent,
   },
   segmentButtonText: {
     color: tokens.inkSoft,
@@ -592,7 +682,7 @@ export const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   chipText: {
-    color: tokens.inkSoft,
+    color: tokens.accentDeep,
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 0,
@@ -663,7 +753,7 @@ export const styles = StyleSheet.create({
   },
   sendButton: {
     alignItems: "center",
-    backgroundColor: tokens.ink,
+    backgroundColor: tokens.accent,
     borderRadius: 8,
     height: 42,
     justifyContent: "center",
@@ -703,7 +793,7 @@ export const styles = StyleSheet.create({
   },
   roundIconButton: {
     alignItems: "center",
-    backgroundColor: tokens.surface,
+    backgroundColor: tokens.accentSoft,
     borderColor: tokens.line,
     borderRadius: 99,
     borderWidth: 1,
@@ -907,7 +997,7 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   planDayRowActive: {
-    backgroundColor: tokens.surfaceAlt,
+    backgroundColor: tokens.accentWash,
   },
   planDayLabel: {
     alignItems: "center",
@@ -957,8 +1047,8 @@ export const styles = StyleSheet.create({
   },
   coachDockMessageUser: {
     alignSelf: "flex-end",
-    backgroundColor: tokens.ink,
-    borderColor: tokens.ink,
+    backgroundColor: tokens.accent,
+    borderColor: tokens.accent,
   },
   coachDockMessageText: {
     color: tokens.inkSoft,
@@ -997,7 +1087,7 @@ export const styles = StyleSheet.create({
   },
   coachDockSend: {
     alignItems: "center",
-    backgroundColor: tokens.ink,
+    backgroundColor: tokens.accent,
     borderRadius: 99,
     height: 36,
     justifyContent: "center",
@@ -1011,7 +1101,7 @@ export const styles = StyleSheet.create({
   coachBubbleButton: {
     alignItems: "center",
     alignSelf: "flex-end",
-    backgroundColor: tokens.ink,
+    backgroundColor: tokens.accent,
     borderRadius: 8,
     height: 46,
     justifyContent: "center",
@@ -1028,7 +1118,7 @@ export const styles = StyleSheet.create({
   },
   startWatchButton: {
     alignItems: "center",
-    backgroundColor: tokens.ink,
+    backgroundColor: tokens.accent,
     borderRadius: 14,
     flex: 1,
     flexDirection: "row",
@@ -1095,8 +1185,8 @@ export const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   signalTabActive: {
-    backgroundColor: tokens.ink,
-    borderColor: tokens.ink,
+    backgroundColor: tokens.accent,
+    borderColor: tokens.accent,
   },
   signalTabText: {
     color: tokens.muted,
@@ -1281,8 +1371,8 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   buttonPrimary: {
-    backgroundColor: tokens.ink,
-    borderColor: tokens.ink,
+    backgroundColor: tokens.accent,
+    borderColor: tokens.accent,
   },
   buttonDanger: {
     backgroundColor: "#fff4f2",
@@ -1660,7 +1750,7 @@ export const styles = StyleSheet.create({
     width: 40,
   },
   toggleActive: {
-    backgroundColor: tokens.ink,
+    backgroundColor: tokens.accent,
   },
   toggleKnob: {
     alignItems: "center",
@@ -1713,7 +1803,7 @@ export const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   tabTextActive: {
-    color: tokens.ink,
+    color: tokens.accent,
     fontWeight: "900",
   },
 });
