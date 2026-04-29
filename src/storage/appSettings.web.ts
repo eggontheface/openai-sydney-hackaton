@@ -1,6 +1,10 @@
+import { resolveOpenAiApiKey } from '../config/openAiKeyFallback';
+import type { OpenAiApiKeySource } from '../config/openAiKeyFallback';
+import { localOpenAiApiKey } from '../config/localOpenAiApiKey.generated';
+
 export type AppSettings = {
   hasOpenAiApiKey: boolean;
-  openAiApiKeySource: 'secure_store' | 'local_storage' | 'env' | null;
+  openAiApiKeySource: OpenAiApiKeySource;
   defaultSyncRangeDays: number;
 };
 
@@ -14,11 +18,6 @@ const fallbackSettings: StoredAppSettings = {
   defaultSyncRangeDays: 365,
 };
 const allowedSyncRanges = new Set([7, 30, 365]);
-
-function readEnvOpenAiApiKey(): string | null {
-  const apiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY?.trim();
-  return apiKey || null;
-}
 
 function readLocalStorage(key: string): string | null {
   return typeof localStorage === 'undefined' ? null : localStorage.getItem(key);
@@ -62,11 +61,15 @@ async function loadStoredSettings(): Promise<StoredAppSettings> {
 export async function loadAppSettings(): Promise<AppSettings> {
   const settings = await loadStoredSettings();
   const apiKey = readLocalStorage(openAiApiKeyStorageKey);
-  const envApiKey = readEnvOpenAiApiKey();
+  const activeApiKey = resolveOpenAiApiKey({
+    storedApiKey: apiKey,
+    storedSource: 'local_storage',
+    embeddedApiKey: localOpenAiApiKey,
+  });
 
   return {
-    hasOpenAiApiKey: Boolean(apiKey || envApiKey),
-    openAiApiKeySource: apiKey ? 'local_storage' : envApiKey ? 'env' : null,
+    hasOpenAiApiKey: Boolean(activeApiKey.apiKey),
+    openAiApiKeySource: activeApiKey.source,
     defaultSyncRangeDays: settings.defaultSyncRangeDays ?? 365,
   };
 }
@@ -98,5 +101,9 @@ export async function clearOpenAiApiKey(): Promise<AppSettings> {
 }
 
 export async function readOpenAiApiKey(): Promise<string | null> {
-  return readLocalStorage(openAiApiKeyStorageKey) ?? readEnvOpenAiApiKey();
+  return resolveOpenAiApiKey({
+    storedApiKey: readLocalStorage(openAiApiKeyStorageKey),
+    storedSource: 'local_storage',
+    embeddedApiKey: localOpenAiApiKey,
+  }).apiKey;
 }

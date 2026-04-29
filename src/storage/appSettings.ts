@@ -1,8 +1,12 @@
 import * as SecureStore from 'expo-secure-store';
 
+import { resolveOpenAiApiKey } from '../config/openAiKeyFallback';
+import type { OpenAiApiKeySource } from '../config/openAiKeyFallback';
+import { localOpenAiApiKey } from '../config/localOpenAiApiKey.generated';
+
 export type AppSettings = {
   hasOpenAiApiKey: boolean;
-  openAiApiKeySource: 'secure_store' | 'local_storage' | 'env' | null;
+  openAiApiKeySource: OpenAiApiKeySource;
   defaultSyncRangeDays: number;
 };
 
@@ -16,11 +20,6 @@ const fallbackSettings: StoredAppSettings = {
   defaultSyncRangeDays: 365,
 };
 const allowedSyncRanges = new Set([7, 30, 365]);
-
-function readEnvOpenAiApiKey(): string | null {
-  const apiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY?.trim();
-  return apiKey || null;
-}
 
 function normalizeSettings(settings: StoredAppSettings): StoredAppSettings {
   const defaultSyncRangeDays = allowedSyncRanges.has(Number(settings.defaultSyncRangeDays))
@@ -50,11 +49,15 @@ export async function loadAppSettings(): Promise<AppSettings> {
     loadStoredSettings(),
     SecureStore.getItemAsync(openAiApiKeyStorageKey),
   ]);
-  const envApiKey = readEnvOpenAiApiKey();
+  const activeApiKey = resolveOpenAiApiKey({
+    storedApiKey: apiKey,
+    storedSource: 'secure_store',
+    embeddedApiKey: localOpenAiApiKey,
+  });
 
   return {
-    hasOpenAiApiKey: Boolean(apiKey || envApiKey),
-    openAiApiKeySource: apiKey ? 'secure_store' : envApiKey ? 'env' : null,
+    hasOpenAiApiKey: Boolean(activeApiKey.apiKey),
+    openAiApiKeySource: activeApiKey.source,
     defaultSyncRangeDays: settings.defaultSyncRangeDays ?? 365,
   };
 }
@@ -86,5 +89,10 @@ export async function clearOpenAiApiKey(): Promise<AppSettings> {
 }
 
 export async function readOpenAiApiKey(): Promise<string | null> {
-  return (await SecureStore.getItemAsync(openAiApiKeyStorageKey)) ?? readEnvOpenAiApiKey();
+  const apiKey = await SecureStore.getItemAsync(openAiApiKeyStorageKey);
+  return resolveOpenAiApiKey({
+    storedApiKey: apiKey,
+    storedSource: 'secure_store',
+    embeddedApiKey: localOpenAiApiKey,
+  }).apiKey;
 }
