@@ -2,6 +2,15 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as SQLite from 'expo-sqlite';
 
+import {
+  normalizeGoalProfile,
+  type CoachingStyle,
+  type ExperienceLevel,
+  type GoalProfile,
+  type GoalProfileDraft,
+  type PrimaryGoal,
+  type StartingStrategy,
+} from '../goals/goalProfile';
 import { formatDuration, localDateKey } from '../lib/dates';
 import { safeJsonStringify } from '../lib/json';
 import {
@@ -240,6 +249,23 @@ type DailyMetricsRow = {
   generated_at: string;
 };
 
+type GoalProfileRow = {
+  id: 'current';
+  primary_goal: PrimaryGoal;
+  secondary_goals_json: string;
+  motivation: string | null;
+  timeframe: string | null;
+  experience_level: ExperienceLevel;
+  preferred_activities_json: string;
+  disliked_activities_json: string;
+  constraints_json: string;
+  risk_flags_json: string;
+  coaching_style: CoachingStyle;
+  starting_strategy: StartingStrategy;
+  confidence: number;
+  updated_at: string;
+};
+
 export type CoachHealthContext = {
   generatedAt: string;
   hasSyncedHealthData: boolean;
@@ -394,6 +420,21 @@ function bool(value: number | null | undefined): boolean {
 
 function optionalNumber(value: number | null | undefined): number | undefined {
   return value == null ? undefined : Number(value);
+}
+
+function parseJsonStringArray(value: string | null | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string')
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function numberOrZero(value: number | null | undefined): number {
@@ -1006,6 +1047,26 @@ function toDailyMetrics(row: DailyMetricsRow): DailyMetrics {
   };
 }
 
+function toGoalProfile(row: GoalProfileRow): GoalProfile {
+  return normalizeGoalProfile(
+    {
+      primaryGoal: row.primary_goal,
+      secondaryGoals: parseJsonStringArray(row.secondary_goals_json) as PrimaryGoal[],
+      motivation: row.motivation,
+      timeframe: row.timeframe,
+      experienceLevel: row.experience_level,
+      preferredActivities: parseJsonStringArray(row.preferred_activities_json),
+      dislikedActivities: parseJsonStringArray(row.disliked_activities_json),
+      constraints: parseJsonStringArray(row.constraints_json),
+      riskFlags: parseJsonStringArray(row.risk_flags_json),
+      coachingStyle: row.coaching_style,
+      startingStrategy: row.starting_strategy,
+      confidence: row.confidence,
+    },
+    row.updated_at,
+  );
+}
+
 async function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (!dbPromise) {
     dbPromise = SQLite.openDatabaseAsync('training_pipeline.db').then(async (db) => {
@@ -1237,6 +1298,23 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_health_connect_diagnostics_started
       ON health_connect_diagnostics(sync_started_at);
+
+    CREATE TABLE IF NOT EXISTS goal_profile (
+      id TEXT PRIMARY KEY NOT NULL CHECK (id = 'current'),
+      primary_goal TEXT NOT NULL,
+      secondary_goals_json TEXT NOT NULL,
+      motivation TEXT,
+      timeframe TEXT,
+      experience_level TEXT NOT NULL,
+      preferred_activities_json TEXT NOT NULL,
+      disliked_activities_json TEXT NOT NULL,
+      constraints_json TEXT NOT NULL,
+      risk_flags_json TEXT NOT NULL,
+      coaching_style TEXT NOT NULL,
+      starting_strategy TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   await ensureHrvSchema(db);
@@ -1285,6 +1363,59 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
 
 export async function initTrainingStore(): Promise<void> {
   await getDb();
+}
+
+export async function getGoalProfile(): Promise<GoalProfile | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<GoalProfileRow>(
+    "SELECT * FROM goal_profile WHERE id = 'current' LIMIT 1",
+  );
+
+  return row ? toGoalProfile(row) : null;
+}
+
+export async function saveGoalProfile(draft: GoalProfileDraft): Promise<GoalProfile> {
+  const db = await getDb();
+  const current = await getGoalProfile();
+  const next = normalizeGoalProfile(
+    {
+      ...(current ?? {}),
+      ...draft,
+    },
+    new Date().toISOString(),
+  );
+
+  await db.runAsync(
+    `
+      INSERT OR REPLACE INTO goal_profile (
+        id, primary_goal, secondary_goals_json, motivation, timeframe,
+        experience_level, preferred_activities_json, disliked_activities_json,
+        constraints_json, risk_flags_json, coaching_style, starting_strategy,
+        confidence, updated_at
+      )
+      VALUES ('current', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    next.primaryGoal,
+    safeJsonStringify(next.secondaryGoals),
+    next.motivation,
+    next.timeframe,
+    next.experienceLevel,
+    safeJsonStringify(next.preferredActivities),
+    safeJsonStringify(next.dislikedActivities),
+    safeJsonStringify(next.constraints),
+    safeJsonStringify(next.riskFlags),
+    next.coachingStyle,
+    next.startingStrategy,
+    next.confidence,
+    next.updatedAt,
+  );
+
+  return next;
+}
+
+export async function clearGoalProfile(): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("DELETE FROM goal_profile WHERE id = 'current'");
 }
 
 function isHealthConnectDailyAggregate(sample: HealthSample): boolean {
@@ -2420,6 +2551,7 @@ export async function exportPipelineJson(): Promise<string> {
     syncRuns,
     diagnostics,
     sourceFreshness,
+    goalProfileRow,
   ] =
     await Promise.all([
       db.getAllAsync<HealthSampleRow>('SELECT * FROM health_samples ORDER BY start_at ASC'),
@@ -2430,6 +2562,7 @@ export async function exportPipelineJson(): Promise<string> {
       db.getAllAsync<SyncRunRow>('SELECT * FROM sync_runs ORDER BY started_at ASC'),
       db.getAllAsync('SELECT * FROM health_connect_diagnostics ORDER BY sync_started_at ASC'),
       getSourceFreshness(db),
+      db.getFirstAsync<GoalProfileRow>("SELECT * FROM goal_profile WHERE id = 'current' LIMIT 1"),
     ]);
 
   const payload = {
@@ -2443,6 +2576,7 @@ export async function exportPipelineJson(): Promise<string> {
     sourceFreshness,
     syncRuns,
     diagnostics,
+    goalProfile: goalProfileRow ? toGoalProfile(goalProfileRow) : null,
   };
 
   const directory = FileSystem.documentDirectory;

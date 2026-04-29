@@ -9,6 +9,11 @@ import type {
   SyncPayload,
   SyncRange,
 } from '../health/types';
+import {
+  normalizeGoalProfile,
+  type GoalProfile,
+  type GoalProfileDraft,
+} from '../goals/goalProfile';
 
 export type HealthSampleRow = {
   sample_id: string;
@@ -353,7 +358,38 @@ let lastSync: SyncRunRow | null = {
   error: null,
 };
 
+let goalProfile: GoalProfile | null = normalizeGoalProfile({
+  primaryGoal: 'endurance',
+  secondaryGoals: ['strength'],
+  motivation: 'Build toward a confident half marathon block without overreaching.',
+  timeframe: '12 weeks',
+  experienceLevel: 'recreational',
+  preferredActivities: ['run', 'strength', 'walk'],
+  dislikedActivities: [],
+  constraints: ['protect recovery', 'avoid sudden volume jumps'],
+  riskFlags: [],
+  coachingStyle: 'supportive',
+  startingStrategy: 'conservative_build',
+  confidence: 0.74,
+});
+
 export async function initTrainingStore(): Promise<void> {}
+
+export async function getGoalProfile(): Promise<GoalProfile | null> {
+  return goalProfile;
+}
+
+export async function saveGoalProfile(draft: GoalProfileDraft): Promise<GoalProfile> {
+  goalProfile = normalizeGoalProfile({
+    ...(goalProfile ?? {}),
+    ...draft,
+  });
+  return goalProfile;
+}
+
+export async function clearGoalProfile(): Promise<void> {
+  goalProfile = null;
+}
 
 export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
   return (
