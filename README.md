@@ -1,16 +1,30 @@
-# Training Pipeline
+# OpenAI Sydney Hackathon
 
-Small Expo dev-client app for importing personal training data from Apple Health on iOS or Health Connect on Android into a local SQLite pipeline.
+Wellness insights app exploring how to help people understand the health and fitness data already on their phone.
 
-## What It Imports
+## Direction
+
+- iOS data source: Apple Health via HealthKit.
+- Android data source: Health Connect.
+- App approach: React Native with native health-data modules.
+- Product scope: wellness insights, not diagnosis or medical advice.
+
+## Training Pipeline
+
+The mobile app imports personal training data from Apple Health on iOS or Health Connect on Android into a local SQLite pipeline.
+
+### What It Imports
 
 - Steps
-- Active energy
+- Active and total energy
 - Walking/running distance
-- Heart-rate samples
+- Heart rate, resting heart rate, HRV, and VO2 max
+- Sleep sessions and stages
 - Workouts / exercise sessions
+- Weight, body fat, and lean body mass
+- Nutrition and hydration
 
-All records are normalized into `health_samples` in `training_pipeline.db` and can be exported as JSON from the app.
+Records are normalized into platform-neutral tables, including `health_samples`, `sleep_sessions`, `workouts`, `nutrition_daily`, and `daily_metrics`, and can be exported as JSON from the app.
 
 ## Run Locally
 
