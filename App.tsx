@@ -5,7 +5,7 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
+  View,
 } from "react-native";
 
 import { openAiCoachModel, sendCoachMessage } from "./src/ai/openaiCoach";
@@ -512,7 +512,7 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.safeArea}>
       <StatusBar style="dark" />
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -599,6 +599,6 @@ export default function App() {
           <TabBar active={activeTab} onChange={setActiveTab} />
         ) : null}
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
