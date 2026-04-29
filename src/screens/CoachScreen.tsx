@@ -58,9 +58,12 @@ export function CoachScreen({
   const hrvLabel = hrvMetricLabel(current);
   const rhr = current?.restingHr ? `${Math.round(current.restingHr)} bpm` : '—';
   const quickReplies = ['Make it easier', 'Move it to tomorrow', "I'm short on time"];
-  const canSendCoachMessage = hasOpenAiApiKey && !coachBusy && Boolean(coachDraft.trim());
+  const coachInputDisabled = coachBusy || busy || !hasOpenAiApiKey;
+  const canSendCoachMessage = hasOpenAiApiKey && !coachBusy && !busy && Boolean(coachDraft.trim());
   const composerPlaceholder = hasOpenAiApiKey
-    ? 'Ask your coach...'
+    ? busy
+      ? 'Sync in progress...'
+      : 'Ask your coach...'
     : 'Save an OpenAI API key in You to chat';
   const hasSyncedData =
     snapshot.totalSamples > 0 ||
@@ -194,12 +197,12 @@ export function CoachScreen({
         {quickReplies.map((chip) => (
           <Pressable
             accessibilityRole="button"
-            disabled={coachBusy || !hasOpenAiApiKey}
+            disabled={coachInputDisabled}
             key={chip}
             onPress={() => onSendCoachMessage(chip)}
             style={({ pressed }) => [
               styles.chip,
-              (coachBusy || !hasOpenAiApiKey) && styles.disabled,
+              coachInputDisabled && styles.disabled,
               pressed && styles.pressed,
             ]}
           >
@@ -214,7 +217,7 @@ export function CoachScreen({
             accessibilityLabel="Ask your coach"
             autoCorrect
             cursorColor={tokens.ink}
-            editable={hasOpenAiApiKey && !coachBusy}
+            editable={!coachInputDisabled}
             onChangeText={onChangeCoachDraft}
             onSubmitEditing={() => onSendCoachMessage()}
             placeholder={composerPlaceholder}

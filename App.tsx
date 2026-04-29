@@ -143,6 +143,11 @@ export default function App() {
       return;
     }
 
+    if (busy) {
+      setStatus('Wait for the current sync to finish before messaging the coach.');
+      return;
+    }
+
     const apiKey = await readOpenAiApiKey();
     if (!apiKey) {
       setStatus('Save an OpenAI API key in You before messaging the coach.');
@@ -174,12 +179,15 @@ export default function App() {
       setStatus(`Coach answered with ${openAiCoachModel}`);
     } catch (error) {
       const message = String(error instanceof Error ? error.message : error);
+      const isLocalDatabaseError = message.toLowerCase().includes('database is locked');
       setStatus(message);
       setCoachMessages((messages) => [
         ...messages,
         createCoachMessage(
           'coach',
-          `I couldn't reach the OpenAI API. ${message}`,
+          isLocalDatabaseError
+            ? `I couldn't read the local health database. Wait for sync to finish, then try again. ${message}`
+            : `I couldn't reach the OpenAI API. ${message}`,
         ),
       ]);
     } finally {

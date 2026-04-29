@@ -1,11 +1,14 @@
-import { StyleSheet } from 'react-native';
+import { Platform, StatusBar as NativeStatusBar, StyleSheet } from 'react-native';
 
 import { tokens } from '../theme/tokens';
+
+const androidStatusBarInset = Platform.OS === 'android' ? NativeStatusBar.currentHeight ?? 0 : 0;
 
 export const styles = StyleSheet.create({
   safeArea: {
     backgroundColor: tokens.bg,
     flex: 1,
+    paddingTop: androidStatusBarInset,
   },
   appShell: {
     flex: 1,

@@ -498,6 +498,16 @@ const sourceFreshnessConfigs: SourceFreshnessConfig[] = [
 ];
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | undefined;
+let storageQueue: Promise<void> = Promise.resolve();
+
+function withStorageLock<T>(operation: () => Promise<T>): Promise<T> {
+  const run = storageQueue.then(operation, operation);
+  storageQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
 
 function bool(value: number | null | undefined): boolean {
   return Boolean(value);
@@ -1051,10 +1061,8 @@ async function getSourceFreshness(db: SQLite.SQLiteDatabase): Promise<SourceFres
   const rows: SourceFreshness[] = [];
 
   for (const config of sourceFreshnessConfigs) {
-    const [stats, presentTypes] = await Promise.all([
-      freshnessStatsFor(db, config),
-      presentCanonicalTypesFor(db, config.canonicalTypes),
-    ]);
+    const stats = await freshnessStatsFor(db, config);
+    const presentTypes = await presentCanonicalTypesFor(db, config.canonicalTypes);
     const sampleCount = Number(stats?.sample_count ?? 0);
     const dayCount = Number(stats?.day_count ?? 0);
     const latestDate = stats?.latest_date ?? undefined;
@@ -1200,6 +1208,7 @@ async function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (!dbPromise) {
     dbPromise = SQLite.openDatabaseAsync('training_pipeline.db').then(async (db) => {
       await db.execAsync('PRAGMA journal_mode = WAL;');
+      await db.execAsync('PRAGMA busy_timeout = 5000;');
       await migrateLegacyHealthSamples(db);
       await createSchema(db);
       return db;
@@ -1583,11 +1592,12 @@ async function ensureSyncRunColumns(db: SQLite.SQLiteDatabase): Promise<void> {
 }
 
 export async function initTrainingStore(): Promise<void> {
-  await getDb();
+  await withStorageLock(async () => {
+    await getDb();
+  });
 }
 
-export async function getGoalProfile(): Promise<GoalProfile | null> {
-  const db = await getDb();
+async function getGoalProfileFromDb(db: SQLite.SQLiteDatabase): Promise<GoalProfile | null> {
   const row = await db.getFirstAsync<GoalProfileRow>(
     "SELECT * FROM goal_profile WHERE id = 'current' LIMIT 1",
   );
@@ -1595,48 +1605,56 @@ export async function getGoalProfile(): Promise<GoalProfile | null> {
   return row ? toGoalProfile(row) : null;
 }
 
+export async function getGoalProfile(): Promise<GoalProfile | null> {
+  return withStorageLock(async () => getGoalProfileFromDb(await getDb()));
+}
+
 export async function saveGoalProfile(draft: GoalProfileDraft): Promise<GoalProfile> {
-  const db = await getDb();
-  const current = await getGoalProfile();
-  const next = normalizeGoalProfile(
-    {
-      ...(current ?? {}),
-      ...draft,
-    },
-    new Date().toISOString(),
-  );
+  return withStorageLock(async () => {
+    const db = await getDb();
+    const current = await getGoalProfileFromDb(db);
+    const next = normalizeGoalProfile(
+      {
+        ...(current ?? {}),
+        ...draft,
+      },
+      new Date().toISOString(),
+    );
 
-  await db.runAsync(
-    `
-      INSERT OR REPLACE INTO goal_profile (
-        id, primary_goal, secondary_goals_json, motivation, timeframe,
-        experience_level, preferred_activities_json, disliked_activities_json,
-        constraints_json, risk_flags_json, coaching_style, starting_strategy,
-        confidence, updated_at
-      )
-      VALUES ('current', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    next.primaryGoal,
-    safeJsonStringify(next.secondaryGoals),
-    next.motivation,
-    next.timeframe,
-    next.experienceLevel,
-    safeJsonStringify(next.preferredActivities),
-    safeJsonStringify(next.dislikedActivities),
-    safeJsonStringify(next.constraints),
-    safeJsonStringify(next.riskFlags),
-    next.coachingStyle,
-    next.startingStrategy,
-    next.confidence,
-    next.updatedAt,
-  );
+    await db.runAsync(
+      `
+        INSERT OR REPLACE INTO goal_profile (
+          id, primary_goal, secondary_goals_json, motivation, timeframe,
+          experience_level, preferred_activities_json, disliked_activities_json,
+          constraints_json, risk_flags_json, coaching_style, starting_strategy,
+          confidence, updated_at
+        )
+        VALUES ('current', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      next.primaryGoal,
+      safeJsonStringify(next.secondaryGoals),
+      next.motivation,
+      next.timeframe,
+      next.experienceLevel,
+      safeJsonStringify(next.preferredActivities),
+      safeJsonStringify(next.dislikedActivities),
+      safeJsonStringify(next.constraints),
+      safeJsonStringify(next.riskFlags),
+      next.coachingStyle,
+      next.startingStrategy,
+      next.confidence,
+      next.updatedAt,
+    );
 
-  return next;
+    return next;
+  });
 }
 
 export async function clearGoalProfile(): Promise<void> {
-  const db = await getDb();
-  await db.runAsync("DELETE FROM goal_profile WHERE id = 'current'");
+  await withStorageLock(async () => {
+    const db = await getDb();
+    await db.runAsync("DELETE FROM goal_profile WHERE id = 'current'");
+  });
 }
 
 function isHealthConnectDailyAggregate(sample: HealthSample): boolean {
@@ -1648,36 +1666,37 @@ function sleepReplacementKey(sleep: SleepSessionRecord): string {
 }
 
 export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
-  const db = await getDb();
-  const importedAt = new Date().toISOString();
+  return withStorageLock(async () => {
+    const db = await getDb();
+    const importedAt = new Date().toISOString();
 
-  await db.withExclusiveTransactionAsync(async (txn) => {
-    const dailyAggregateReplacements = new Map<string, HealthSample>();
-    payload.samples.forEach((sample) => {
-      if (!isHealthConnectDailyAggregate(sample)) {
-        return;
+    await db.withExclusiveTransactionAsync(async (txn) => {
+      const dailyAggregateReplacements = new Map<string, HealthSample>();
+      payload.samples.forEach((sample) => {
+        if (!isHealthConnectDailyAggregate(sample)) {
+          return;
+        }
+
+        dailyAggregateReplacements.set(
+          `${sample.platform}:${sample.canonicalType}:${sample.localDate}`,
+          sample,
+        );
+      });
+
+      for (const sample of dailyAggregateReplacements.values()) {
+        await txn.runAsync(
+          `
+            DELETE FROM health_samples
+            WHERE platform = ?
+              AND canonical_type = ?
+              AND local_date = ?
+              AND sample_id LIKE 'health_connect:daily:%'
+          `,
+          sample.platform,
+          sample.canonicalType,
+          sample.localDate,
+        );
       }
-
-      dailyAggregateReplacements.set(
-        `${sample.platform}:${sample.canonicalType}:${sample.localDate}`,
-        sample,
-      );
-    });
-
-    for (const sample of dailyAggregateReplacements.values()) {
-      await txn.runAsync(
-        `
-          DELETE FROM health_samples
-          WHERE platform = ?
-            AND canonical_type = ?
-            AND local_date = ?
-            AND sample_id LIKE 'health_connect:daily:%'
-        `,
-        sample.platform,
-        sample.canonicalType,
-        sample.localDate,
-      );
-    }
 
     const sleepSessionReplacements = new Map<string, SleepSessionRecord>();
     payload.sleepSessions.forEach((sleep) => {
@@ -1863,14 +1882,15 @@ export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
     }
   });
 
-  await rebuildDailyMetrics();
+    await rebuildDailyMetrics();
 
-  return (
-    payload.samples.length +
-    payload.workouts.length +
-    payload.sleepSessions.length +
-    payload.nutritionDaily.length
-  );
+    return (
+      payload.samples.length +
+      payload.workouts.length +
+      payload.sleepSessions.length +
+      payload.nutritionDaily.length
+    );
+  });
 }
 
 export async function recordSyncRun(
@@ -1881,34 +1901,36 @@ export async function recordSyncRun(
   error?: unknown,
   details: SyncRunDetails = {},
 ): Promise<void> {
-  const db = await getDb();
-  const endedAt = new Date().toISOString();
+  await withStorageLock(async () => {
+    const db = await getDb();
+    const endedAt = new Date().toISOString();
 
-  await db.runAsync(
-    `
-      INSERT INTO sync_runs (
-        provider, sync_type, started_at, ended_at, range_start, range_end,
-        sample_count, health_sample_count, workout_count, sleep_session_count,
-        nutrition_day_count, warning_count, diagnostic_count, status, error
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    provider,
-    details.syncType ?? 'manual',
-    startedAt,
-    endedAt,
-    range.startDate.toISOString(),
-    range.endDate.toISOString(),
-    sampleCount,
-    details.healthSampleCount ?? sampleCount,
-    details.workoutCount ?? 0,
-    details.sleepSessionCount ?? 0,
-    details.nutritionDayCount ?? 0,
-    details.warningCount ?? 0,
-    details.diagnosticCount ?? 0,
-    error ? 'error' : 'ok',
-    error ? String(error instanceof Error ? error.message : error) : null,
-  );
+    await db.runAsync(
+      `
+        INSERT INTO sync_runs (
+          provider, sync_type, started_at, ended_at, range_start, range_end,
+          sample_count, health_sample_count, workout_count, sleep_session_count,
+          nutrition_day_count, warning_count, diagnostic_count, status, error
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      provider,
+      details.syncType ?? 'manual',
+      startedAt,
+      endedAt,
+      range.startDate.toISOString(),
+      range.endDate.toISOString(),
+      sampleCount,
+      details.healthSampleCount ?? sampleCount,
+      details.workoutCount ?? 0,
+      details.sleepSessionCount ?? 0,
+      details.nutritionDayCount ?? 0,
+      details.warningCount ?? 0,
+      details.diagnosticCount ?? 0,
+      error ? 'error' : 'ok',
+      error ? String(error instanceof Error ? error.message : error) : null,
+    );
+  });
 }
 
 async function distinctMetricDates(db: SQLite.SQLiteDatabase): Promise<string[]> {
@@ -2538,27 +2560,24 @@ function deriveRecommendation(
 }
 
 export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
-  const db = await getDb();
-  await rebuildDailyMetrics();
+  return withStorageLock(async () => {
+    const db = await getDb();
+    await rebuildDailyMetrics();
 
-  const [
-    countRow,
-    workoutRows,
-    sleepCountRow,
-    nutritionCountRow,
-    coverageRow,
-    availabilityRows,
-  ] = await Promise.all([
-    db.getFirstAsync<{ total: number }>('SELECT COUNT(*) AS total FROM health_samples'),
-    db.getAllAsync<WorkoutRow>('SELECT * FROM workouts ORDER BY start_at ASC'),
-    db.getFirstAsync<{ total: number }>(
+    const countRow = await db.getFirstAsync<{ total: number }>(
+      'SELECT COUNT(*) AS total FROM health_samples',
+    );
+    const workoutRows = await db.getAllAsync<WorkoutRow>('SELECT * FROM workouts ORDER BY start_at ASC');
+    const sleepCountRow = await db.getFirstAsync<{ total: number }>(
       'SELECT COUNT(*) AS total FROM daily_metrics WHERE has_sleep = 1',
-    ),
-    db.getFirstAsync<{ total: number }>('SELECT COUNT(*) AS total FROM nutrition_daily'),
-    db.getFirstAsync<{ total: number }>(
+    );
+    const nutritionCountRow = await db.getFirstAsync<{ total: number }>(
+      'SELECT COUNT(*) AS total FROM nutrition_daily',
+    );
+    const coverageRow = await db.getFirstAsync<{ total: number }>(
       'SELECT COUNT(*) AS total FROM daily_metrics WHERE source_count > 0',
-    ),
-    db.getAllAsync<MetricAvailabilityRow>(`
+    );
+    const availabilityRows = await db.getAllAsync<MetricAvailabilityRow>(`
       SELECT
         canonical_type,
         COUNT(*) AS sample_count,
@@ -2566,116 +2585,120 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
         MAX(local_date) AS latest_date
       FROM health_samples
       GROUP BY canonical_type
-    `),
-  ]);
-  const dedupedWorkoutCount = dedupeWorkoutRows(workoutRows).length;
-  const sleepCount = Number(sleepCountRow?.total ?? 0);
-  const nutritionDays = Number(nutritionCountRow?.total ?? 0);
-  const metricAvailability = buildMetricAvailability(
-    availabilityRows,
-    workoutRows,
-    sleepCount,
-    nutritionDays,
-  );
-  const [diagnosticRows, sourceFreshness] = await Promise.all([
-    getLatestHealthConnectDiagnostics(db),
-    getSourceFreshness(db),
-  ]);
+    `);
+    const dedupedWorkoutCount = dedupeWorkoutRows(workoutRows).length;
+    const sleepCount = Number(sleepCountRow?.total ?? 0);
+    const nutritionDays = Number(nutritionCountRow?.total ?? 0);
+    const metricAvailability = buildMetricAvailability(
+      availabilityRows,
+      workoutRows,
+      sleepCount,
+      nutritionDays,
+    );
+    const diagnosticRows = await getLatestHealthConnectDiagnostics(db);
+    const sourceFreshness = await getSourceFreshness(db);
 
-  const rows = await db.getAllAsync<DailyMetricsRow>(`
-    SELECT *
-    FROM daily_metrics
-    ORDER BY date DESC
-    LIMIT 21
-  `);
-  const history = rows.map(toDailyMetrics);
-  const todayKey = localDateKey(new Date());
-  const today = history.find((row) => row.date === todayKey) ?? history[0] ?? null;
-  const recentWorkouts = await getRecentWorkouts(5);
-  const recentSamples = await getRecentSamples(12);
+    const rows = await db.getAllAsync<DailyMetricsRow>(`
+      SELECT *
+      FROM daily_metrics
+      ORDER BY date DESC
+      LIMIT 21
+    `);
+    const history = rows.map(toDailyMetrics);
+    const todayKey = localDateKey(new Date());
+    const today = history.find((row) => row.date === todayKey) ?? history[0] ?? null;
+    const recentWorkouts = await getRecentWorkoutsFromDb(db, 5);
+    const recentSamples = await getRecentSamplesFromDb(db, 12);
 
-  return {
-    totalSamples: Number(countRow?.total ?? 0),
-    workoutCount: dedupedWorkoutCount,
-    sleepCount,
-    nutritionDays,
-    coverageDays: Number(coverageRow?.total ?? 0),
-    metricAvailability,
-    sourceFreshness,
-    latestDiagnostics: diagnosticRows.map((row) => ({
-      recordType: row.record_type,
-      canonicalType: row.canonical_type,
-      permission: row.permission,
-      readKind: row.read_kind,
-      recordsRead: Number(row.records_read),
-      samplesWritten: Number(row.samples_written),
-      message: row.message ?? undefined,
-    })),
-    today,
-    history,
-    recentWorkouts: recentWorkouts.map((row) => ({
-      workoutId: row.workout_id,
-      platform: row.platform,
-      sourceApp: row.source_app ?? undefined,
-      startAt: row.start_at,
-      endAt: row.end_at,
-      localDate: row.local_date,
-      name: row.name ?? undefined,
-      activityType: row.activity_type ?? undefined,
-      sportBucket: row.sport_bucket,
-      elapsedSeconds: row.elapsed_seconds,
-      movingSeconds: row.moving_seconds ?? undefined,
-      distanceKm: row.distance_km ?? undefined,
-      activeKcal: row.active_kcal ?? undefined,
-      totalKcal: row.total_kcal ?? undefined,
-      avgHrBpm: row.avg_hr_bpm ?? undefined,
-      maxHrBpm: row.max_hr_bpm ?? undefined,
-      routeAvailable: Boolean(row.route_available),
-      lapsJson: row.laps_json ?? undefined,
-      streamsJson: row.streams_json ?? undefined,
-      rawJson: row.raw_json,
-    })),
-    recentSamples: recentSamples.map((row) => ({
-      sampleId: row.sample_id,
-      platform: row.platform,
-      recordType: row.record_type,
-      canonicalType: row.canonical_type,
-      sourceApp: row.source_app ?? undefined,
-      sourceDevice: row.source_device ?? undefined,
-      startAt: row.start_at,
-      endAt: row.end_at,
-      localDate: row.local_date,
-      timezone: row.timezone ?? undefined,
-      value: row.value ?? undefined,
-      unit: row.unit ?? undefined,
-      hrvMethod: row.hrv_method ?? undefined,
-      metadataJson: row.metadata_json,
-      sourceModifiedAt: row.source_modified_at ?? undefined,
-    })),
-    recommendation: deriveRecommendation(today, history, sourceFreshness),
-  };
+    return {
+      totalSamples: Number(countRow?.total ?? 0),
+      workoutCount: dedupedWorkoutCount,
+      sleepCount,
+      nutritionDays,
+      coverageDays: Number(coverageRow?.total ?? 0),
+      metricAvailability,
+      sourceFreshness,
+      latestDiagnostics: diagnosticRows.map((row) => ({
+        recordType: row.record_type,
+        canonicalType: row.canonical_type,
+        permission: row.permission,
+        readKind: row.read_kind,
+        recordsRead: Number(row.records_read),
+        samplesWritten: Number(row.samples_written),
+        message: row.message ?? undefined,
+      })),
+      today,
+      history,
+      recentWorkouts: recentWorkouts.map((row) => ({
+        workoutId: row.workout_id,
+        platform: row.platform,
+        sourceApp: row.source_app ?? undefined,
+        startAt: row.start_at,
+        endAt: row.end_at,
+        localDate: row.local_date,
+        name: row.name ?? undefined,
+        activityType: row.activity_type ?? undefined,
+        sportBucket: row.sport_bucket,
+        elapsedSeconds: row.elapsed_seconds,
+        movingSeconds: row.moving_seconds ?? undefined,
+        distanceKm: row.distance_km ?? undefined,
+        activeKcal: row.active_kcal ?? undefined,
+        totalKcal: row.total_kcal ?? undefined,
+        avgHrBpm: row.avg_hr_bpm ?? undefined,
+        maxHrBpm: row.max_hr_bpm ?? undefined,
+        routeAvailable: Boolean(row.route_available),
+        lapsJson: row.laps_json ?? undefined,
+        streamsJson: row.streams_json ?? undefined,
+        rawJson: row.raw_json,
+      })),
+      recentSamples: recentSamples.map((row) => ({
+        sampleId: row.sample_id,
+        platform: row.platform,
+        recordType: row.record_type,
+        canonicalType: row.canonical_type,
+        sourceApp: row.source_app ?? undefined,
+        sourceDevice: row.source_device ?? undefined,
+        startAt: row.start_at,
+        endAt: row.end_at,
+        localDate: row.local_date,
+        timezone: row.timezone ?? undefined,
+        value: row.value ?? undefined,
+        unit: row.unit ?? undefined,
+        hrvMethod: row.hrv_method ?? undefined,
+        metadataJson: row.metadata_json,
+        sourceModifiedAt: row.source_modified_at ?? undefined,
+      })),
+      recommendation: deriveRecommendation(today, history, sourceFreshness),
+    };
+  });
 }
 
 export async function getLastSyncRun(): Promise<SyncRunRow | null> {
-  const db = await getDb();
-  return db.getFirstAsync<SyncRunRow>(
-    'SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1',
-  );
+  return withStorageLock(async () => {
+    const db = await getDb();
+    return db.getFirstAsync<SyncRunRow>(
+      'SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1',
+    );
+  });
 }
 
 export async function getLastSuccessfulSyncRun(): Promise<SyncRunRow | null> {
-  const db = await getDb();
-  return db.getFirstAsync<SyncRunRow>(
-    "SELECT * FROM sync_runs WHERE status = 'ok' ORDER BY ended_at DESC, id DESC LIMIT 1",
-  );
+  return withStorageLock(async () => {
+    const db = await getDb();
+    return db.getFirstAsync<SyncRunRow>(
+      "SELECT * FROM sync_runs WHERE status = 'ok' ORDER BY ended_at DESC, id DESC LIMIT 1",
+    );
+  });
 }
 
 export async function getRecentSyncRuns(limit = 6): Promise<SyncRunRow[]> {
-  const db = await getDb();
-  return db.getAllAsync<SyncRunRow>(
-    'SELECT * FROM sync_runs ORDER BY ended_at DESC, id DESC LIMIT ?',
-    limit,
-  );
+  return withStorageLock(async () => {
+    const db = await getDb();
+    return db.getAllAsync<SyncRunRow>(
+      'SELECT * FROM sync_runs ORDER BY ended_at DESC, id DESC LIMIT ?',
+      limit,
+    );
+  });
 }
 
 export async function getCoachHealthContext({
@@ -2683,49 +2706,40 @@ export async function getCoachHealthContext({
 }: {
   rebuildDaily?: boolean;
 } = {}): Promise<CoachHealthContext> {
-  const db = await getDb();
-  if (rebuildDaily) {
-    await rebuildDailyMetrics();
-  }
+  return withStorageLock(async () => {
+    const db = await getDb();
+    if (rebuildDaily) {
+      await rebuildDailyMetrics();
+    }
 
-  const [
-    healthSamples,
-    sleepSessions,
-    workouts,
-    nutritionDaily,
-    dailyMetrics,
-    syncRunSummary,
-    latestSync,
-    availabilityRows,
-    latestSamples,
-    dailyRows,
-    workoutRows,
-    sourceFreshness,
-  ] = await Promise.all([
-    db.getFirstAsync<TableCountRow>(`
+    const healthSamples = await db.getFirstAsync<TableCountRow>(`
       SELECT COUNT(*) AS total, MIN(local_date) AS first_date, MAX(local_date) AS latest_date
       FROM health_samples
-    `),
-    db.getFirstAsync<TableCountRow>(`
+    `);
+    const sleepSessions = await db.getFirstAsync<TableCountRow>(`
       SELECT COUNT(*) AS total, MIN(wake_date) AS first_date, MAX(wake_date) AS latest_date
       FROM sleep_sessions
-    `),
-    db.getFirstAsync<TableCountRow>(`
+    `);
+    const workouts = await db.getFirstAsync<TableCountRow>(`
       SELECT COUNT(*) AS total, MIN(local_date) AS first_date, MAX(local_date) AS latest_date
       FROM workouts
-    `),
-    db.getFirstAsync<TableCountRow>(`
+    `);
+    const nutritionDaily = await db.getFirstAsync<TableCountRow>(`
       SELECT COUNT(*) AS total, MIN(date) AS first_date, MAX(date) AS latest_date
       FROM nutrition_daily
-    `),
-    db.getFirstAsync<TableCountRow>(`
+    `);
+    const dailyMetrics = await db.getFirstAsync<TableCountRow>(`
       SELECT COUNT(*) AS total, MIN(date) AS first_date, MAX(date) AS latest_date
       FROM daily_metrics
       WHERE source_count > 0
-    `),
-    db.getFirstAsync<{ total: number }>('SELECT COUNT(*) AS total FROM sync_runs'),
-    db.getFirstAsync<SyncRunRow>('SELECT * FROM sync_runs ORDER BY ended_at DESC LIMIT 1'),
-    db.getAllAsync<MetricAvailabilityRow>(`
+    `);
+    const syncRunSummary = await db.getFirstAsync<{ total: number }>(
+      'SELECT COUNT(*) AS total FROM sync_runs',
+    );
+    const latestSync = await db.getFirstAsync<SyncRunRow>(
+      'SELECT * FROM sync_runs ORDER BY ended_at DESC LIMIT 1',
+    );
+    const availabilityRows = await db.getAllAsync<MetricAvailabilityRow>(`
       SELECT
         canonical_type,
         COUNT(*) AS sample_count,
@@ -2733,8 +2747,8 @@ export async function getCoachHealthContext({
         MAX(local_date) AS latest_date
       FROM health_samples
       GROUP BY canonical_type
-    `),
-    db.getAllAsync<LatestSampleByTypeRow>(`
+    `);
+    const latestSamples = await db.getAllAsync<LatestSampleByTypeRow>(`
       SELECT canonical_type, record_type, source_app, local_date, start_at, value, unit, hrv_method
       FROM (
         SELECT
@@ -2754,88 +2768,92 @@ export async function getCoachHealthContext({
       )
       WHERE rank = 1
       ORDER BY canonical_type ASC
-    `),
-    db.getAllAsync<DailyMetricsRow>(`
+    `);
+    const dailyRows = await db.getAllAsync<DailyMetricsRow>(`
       SELECT *
       FROM daily_metrics
       WHERE source_count > 0
       ORDER BY date DESC
       LIMIT 14
-    `),
-    db.getAllAsync<WorkoutRow>('SELECT * FROM workouts ORDER BY start_at DESC'),
-    getSourceFreshness(db),
-  ]);
+    `);
+    const workoutRows = await db.getAllAsync<WorkoutRow>(
+      'SELECT * FROM workouts ORDER BY start_at DESC',
+    );
+    const sourceFreshness = await getSourceFreshness(db);
 
-  const healthSampleCount = Number(healthSamples?.total ?? 0);
-  const sleepSessionCount = Number(sleepSessions?.total ?? 0);
-  const workoutCount = Number(workouts?.total ?? 0);
-  const nutritionDayCount = Number(nutritionDaily?.total ?? 0);
-  const dailyMetricCount = Number(dailyMetrics?.total ?? 0);
-  const hasSyncedHealthData = Boolean(
-    healthSampleCount ||
-      sleepSessionCount ||
-      workoutCount ||
-      nutritionDayCount ||
-      dailyMetricCount,
-  );
-  const metricAvailability = buildMetricAvailability(
-    availabilityRows,
-    workoutRows,
-    sleepSessionCount,
-    nutritionDayCount,
-  );
-  const recentWorkouts = dedupeWorkoutRows(workoutRows).slice(0, 8);
+    const healthSampleCount = Number(healthSamples?.total ?? 0);
+    const sleepSessionCount = Number(sleepSessions?.total ?? 0);
+    const workoutCount = Number(workouts?.total ?? 0);
+    const nutritionDayCount = Number(nutritionDaily?.total ?? 0);
+    const dailyMetricCount = Number(dailyMetrics?.total ?? 0);
+    const hasSyncedHealthData = Boolean(
+      healthSampleCount ||
+        sleepSessionCount ||
+        workoutCount ||
+        nutritionDayCount ||
+        dailyMetricCount,
+    );
+    const metricAvailability = buildMetricAvailability(
+      availabilityRows,
+      workoutRows,
+      sleepSessionCount,
+      nutritionDayCount,
+    );
+    const recentWorkouts = dedupeWorkoutRows(workoutRows).slice(0, 8);
 
-  return {
-    generatedAt: new Date().toISOString(),
-    hasSyncedHealthData,
-    sqliteTables: {
-      healthSamples: healthSamples ?? { total: 0, first_date: null, latest_date: null },
-      sleepSessions: sleepSessions ?? { total: 0, first_date: null, latest_date: null },
-      workouts: workouts ?? { total: 0, first_date: null, latest_date: null },
-      nutritionDaily: nutritionDaily ?? { total: 0, first_date: null, latest_date: null },
-      dailyMetrics: dailyMetrics ?? { total: 0, first_date: null, latest_date: null },
-      syncRuns: {
-        total: Number(syncRunSummary?.total ?? 0),
-        latestEndedAt: latestSync?.ended_at ?? null,
-        latestStatus: latestSync?.status ?? null,
-        latestSampleCount: latestSync?.sample_count ?? null,
-        latestRangeStart: latestSync?.range_start ?? null,
-        latestRangeEnd: latestSync?.range_end ?? null,
+    return {
+      generatedAt: new Date().toISOString(),
+      hasSyncedHealthData,
+      sqliteTables: {
+        healthSamples: healthSamples ?? { total: 0, first_date: null, latest_date: null },
+        sleepSessions: sleepSessions ?? { total: 0, first_date: null, latest_date: null },
+        workouts: workouts ?? { total: 0, first_date: null, latest_date: null },
+        nutritionDaily: nutritionDaily ?? { total: 0, first_date: null, latest_date: null },
+        dailyMetrics: dailyMetrics ?? { total: 0, first_date: null, latest_date: null },
+        syncRuns: {
+          total: Number(syncRunSummary?.total ?? 0),
+          latestEndedAt: latestSync?.ended_at ?? null,
+          latestStatus: latestSync?.status ?? null,
+          latestSampleCount: latestSync?.sample_count ?? null,
+          latestRangeStart: latestSync?.range_start ?? null,
+          latestRangeEnd: latestSync?.range_end ?? null,
+        },
       },
-    },
-    metricAvailability,
-    sourceFreshness,
-    latestSamplesByType: latestSamples.map((sample) => ({
-      canonicalType: sample.canonical_type,
-      recordType: sample.record_type,
-      sourceApp: sample.source_app ?? undefined,
-      localDate: sample.local_date,
-      startAt: sample.start_at,
-      value: sample.value ?? undefined,
-      unit: sample.unit ?? undefined,
-      hrvMethod: sample.hrv_method ?? undefined,
-    })),
-    recentDailyMetrics: dailyRows.map(toDailyMetrics),
-    recentWorkouts: recentWorkouts.map((workout) => ({
-      localDate: workout.local_date,
-      name: workout.name ?? undefined,
-      activityType: workout.activity_type ?? undefined,
-      sportBucket: workout.sport_bucket,
-      elapsedSeconds: workout.elapsed_seconds,
-      distanceKm: workout.distance_km ?? undefined,
-      activeKcal: workout.active_kcal ?? undefined,
-      avgHrBpm: workout.avg_hr_bpm ?? undefined,
-      sourceApp: workout.source_app ?? undefined,
-    })),
-    coachDataInstruction: hasSyncedHealthData
-      ? 'SQLite contains synced health data. Do not tell the user there is no synced health data. If a specific metric is missing, name that exact missing metric instead.'
-      : 'SQLite has no synced health rows yet. Ask the user to sync a health source before making data-dependent claims.',
-  };
+      metricAvailability,
+      sourceFreshness,
+      latestSamplesByType: latestSamples.map((sample) => ({
+        canonicalType: sample.canonical_type,
+        recordType: sample.record_type,
+        sourceApp: sample.source_app ?? undefined,
+        localDate: sample.local_date,
+        startAt: sample.start_at,
+        value: sample.value ?? undefined,
+        unit: sample.unit ?? undefined,
+        hrvMethod: sample.hrv_method ?? undefined,
+      })),
+      recentDailyMetrics: dailyRows.map(toDailyMetrics),
+      recentWorkouts: recentWorkouts.map((workout) => ({
+        localDate: workout.local_date,
+        name: workout.name ?? undefined,
+        activityType: workout.activity_type ?? undefined,
+        sportBucket: workout.sport_bucket,
+        elapsedSeconds: workout.elapsed_seconds,
+        distanceKm: workout.distance_km ?? undefined,
+        activeKcal: workout.active_kcal ?? undefined,
+        avgHrBpm: workout.avg_hr_bpm ?? undefined,
+        sourceApp: workout.source_app ?? undefined,
+      })),
+      coachDataInstruction: hasSyncedHealthData
+        ? 'SQLite contains synced health data. Do not tell the user there is no synced health data. If a specific metric is missing, name that exact missing metric instead.'
+        : 'SQLite has no synced health rows yet. Ask the user to sync a health source before making data-dependent claims.',
+    };
+  });
 }
 
-export async function getRecentSamples(limit = 12): Promise<HealthSampleRow[]> {
-  const db = await getDb();
+async function getRecentSamplesFromDb(
+  db: SQLite.SQLiteDatabase,
+  limit = 12,
+): Promise<HealthSampleRow[]> {
   return db.getAllAsync<HealthSampleRow>(
     `
       SELECT *
@@ -2847,8 +2865,10 @@ export async function getRecentSamples(limit = 12): Promise<HealthSampleRow[]> {
   );
 }
 
-export async function getRecentWorkouts(limit = 5): Promise<WorkoutRow[]> {
-  const db = await getDb();
+async function getRecentWorkoutsFromDb(
+  db: SQLite.SQLiteDatabase,
+  limit = 5,
+): Promise<WorkoutRow[]> {
   const rows = await db.getAllAsync<WorkoutRow>(
     `
       SELECT *
@@ -2860,74 +2880,87 @@ export async function getRecentWorkouts(limit = 5): Promise<WorkoutRow[]> {
   return dedupeWorkoutRows(rows).slice(0, limit);
 }
 
+export async function getRecentSamples(limit = 12): Promise<HealthSampleRow[]> {
+  return withStorageLock(async () => getRecentSamplesFromDb(await getDb(), limit));
+}
+
+export async function getRecentWorkouts(limit = 5): Promise<WorkoutRow[]> {
+  return withStorageLock(async () => getRecentWorkoutsFromDb(await getDb(), limit));
+}
+
 export async function clearPipeline(): Promise<void> {
-  const db = await getDb();
-  await db.execAsync(`
-    DELETE FROM health_samples;
-    DELETE FROM sleep_sessions;
-    DELETE FROM workouts;
-    DELETE FROM nutrition_daily;
-    DELETE FROM daily_metrics;
-    DELETE FROM sync_runs;
-    DELETE FROM health_connect_diagnostics;
-  `);
+  await withStorageLock(async () => {
+    const db = await getDb();
+    await db.execAsync(`
+      DELETE FROM health_samples;
+      DELETE FROM sleep_sessions;
+      DELETE FROM workouts;
+      DELETE FROM nutrition_daily;
+      DELETE FROM daily_metrics;
+      DELETE FROM sync_runs;
+      DELETE FROM health_connect_diagnostics;
+    `);
+  });
 }
 
 export async function exportPipelineJson(): Promise<string> {
-  const db = await getDb();
-  const [
-    samples,
-    sleepSessions,
-    workouts,
-    nutritionDaily,
-    dailyMetrics,
-    syncRuns,
-    diagnostics,
-    sourceFreshness,
-    goalProfileRow,
-  ] =
-    await Promise.all([
-      db.getAllAsync<HealthSampleRow>('SELECT * FROM health_samples ORDER BY start_at ASC'),
-      db.getAllAsync<SleepSessionRow>('SELECT * FROM sleep_sessions ORDER BY start_at ASC'),
-      db.getAllAsync<WorkoutRow>('SELECT * FROM workouts ORDER BY start_at ASC'),
-      db.getAllAsync('SELECT * FROM nutrition_daily ORDER BY date ASC'),
-      db.getAllAsync<DailyMetricsRow>('SELECT * FROM daily_metrics ORDER BY date ASC'),
-      db.getAllAsync<SyncRunRow>('SELECT * FROM sync_runs ORDER BY started_at ASC'),
-      db.getAllAsync('SELECT * FROM health_connect_diagnostics ORDER BY sync_started_at ASC'),
-      getSourceFreshness(db),
-      db.getFirstAsync<GoalProfileRow>("SELECT * FROM goal_profile WHERE id = 'current' LIMIT 1"),
-    ]);
+  return withStorageLock(async () => {
+    const db = await getDb();
+    const samples = await db.getAllAsync<HealthSampleRow>(
+      'SELECT * FROM health_samples ORDER BY start_at ASC',
+    );
+    const sleepSessions = await db.getAllAsync<SleepSessionRow>(
+      'SELECT * FROM sleep_sessions ORDER BY start_at ASC',
+    );
+    const workouts = await db.getAllAsync<WorkoutRow>(
+      'SELECT * FROM workouts ORDER BY start_at ASC',
+    );
+    const nutritionDaily = await db.getAllAsync('SELECT * FROM nutrition_daily ORDER BY date ASC');
+    const dailyMetrics = await db.getAllAsync<DailyMetricsRow>(
+      'SELECT * FROM daily_metrics ORDER BY date ASC',
+    );
+    const syncRuns = await db.getAllAsync<SyncRunRow>(
+      'SELECT * FROM sync_runs ORDER BY started_at ASC',
+    );
+    const diagnostics = await db.getAllAsync(
+      'SELECT * FROM health_connect_diagnostics ORDER BY sync_started_at ASC',
+    );
+    const sourceFreshness = await getSourceFreshness(db);
+    const goalProfileRow = await db.getFirstAsync<GoalProfileRow>(
+      "SELECT * FROM goal_profile WHERE id = 'current' LIMIT 1",
+    );
 
-  const payload = {
-    schema: 'biostream_training_pipeline.v4',
-    exportedAt: new Date().toISOString(),
-    samples,
-    sleepSessions,
-    workouts,
-    nutritionDaily,
-    dailyMetrics,
-    sourceFreshness,
-    syncRuns,
-    diagnostics,
-    goalProfile: goalProfileRow ? toGoalProfile(goalProfileRow) : null,
-  };
+    const payload = {
+      schema: 'biostream_training_pipeline.v4',
+      exportedAt: new Date().toISOString(),
+      samples,
+      sleepSessions,
+      workouts,
+      nutritionDaily,
+      dailyMetrics,
+      sourceFreshness,
+      syncRuns,
+      diagnostics,
+      goalProfile: goalProfileRow ? toGoalProfile(goalProfileRow) : null,
+    };
 
-  const directory = FileSystem.documentDirectory;
-  if (!directory) {
-    throw new Error('No writable document directory is available on this device.');
-  }
+    const directory = FileSystem.documentDirectory;
+    if (!directory) {
+      throw new Error('No writable document directory is available on this device.');
+    }
 
-  const fileUri = `${directory}biostream-pipeline-${Date.now()}.json`;
-  await FileSystem.writeAsStringAsync(fileUri, safeJsonStringify(payload), {
-    encoding: FileSystem.EncodingType.UTF8,
-  });
-
-  if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(fileUri, {
-      mimeType: 'application/json',
-      dialogTitle: 'Export BioStream pipeline JSON',
+    const fileUri = `${directory}biostream-pipeline-${Date.now()}.json`;
+    await FileSystem.writeAsStringAsync(fileUri, safeJsonStringify(payload), {
+      encoding: FileSystem.EncodingType.UTF8,
     });
-  }
 
-  return fileUri;
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(fileUri, {
+        mimeType: 'application/json',
+        dialogTitle: 'Export BioStream pipeline JSON',
+      });
+    }
+
+    return fileUri;
+  });
 }
