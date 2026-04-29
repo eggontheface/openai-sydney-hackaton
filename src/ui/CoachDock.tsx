@@ -83,6 +83,7 @@ export function CoachDock({ plan }: { plan: TrainingPlan }) {
         />
         <Mic color={tokens.muted} size={15} strokeWidth={2} />
         <Pressable
+          accessibilityLabel={draft.trim() ? 'Send coach question' : 'Collapse coach chat'}
           accessibilityRole="button"
           onPress={draft.trim() ? send : () => setCollapsed(true)}
           style={[styles.coachDockSend, !draft.trim() && styles.coachDockCollapse]}

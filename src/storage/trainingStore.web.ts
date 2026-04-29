@@ -9,6 +9,7 @@ import type {
   SyncPayload,
   SyncRange,
 } from '../health/types';
+import { emptySnapshot } from '../core/constants';
 import {
   normalizeGoalProfile,
   type GoalProfile,
@@ -395,6 +396,7 @@ let lastSync: SyncRunRow | null = {
 };
 
 let syncRuns: SyncRunRow[] = lastSync ? [lastSync] : [];
+let demoCleared = false;
 
 let goalProfile: GoalProfile | null = normalizeGoalProfile({
   primaryGoal: 'endurance',
@@ -430,6 +432,7 @@ export async function clearGoalProfile(): Promise<void> {
 }
 
 export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
+  demoCleared = false;
   return (
     payload.samples.length +
     payload.workouts.length +
@@ -446,6 +449,7 @@ export async function recordSyncRun(
   error?: unknown,
   details: SyncRunDetails = {},
 ): Promise<void> {
+  demoCleared = false;
   lastSync = {
     id: Date.now(),
     provider,
@@ -468,7 +472,7 @@ export async function recordSyncRun(
 }
 
 export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
-  return demoSnapshot;
+  return demoCleared ? emptySnapshot : demoSnapshot;
 }
 
 function demoTableCount(total: number, firstDate: string | null, latestDate: string | null) {
@@ -480,6 +484,35 @@ function demoTableCount(total: number, firstDate: string | null, latestDate: str
 }
 
 export async function getCoachHealthContext(_options: { rebuildDaily?: boolean } = {}) {
+  if (demoCleared) {
+    return {
+      generatedAt: new Date().toISOString(),
+      hasSyncedHealthData: false,
+      sqliteTables: {
+        healthSamples: demoTableCount(0, null, null),
+        sleepSessions: demoTableCount(0, null, null),
+        workouts: demoTableCount(0, null, null),
+        nutritionDaily: demoTableCount(0, null, null),
+        dailyMetrics: demoTableCount(0, null, null),
+        syncRuns: {
+          total: 0,
+          latestEndedAt: null,
+          latestStatus: null,
+          latestSampleCount: null,
+          latestRangeStart: null,
+          latestRangeEnd: null,
+        },
+      },
+      metricAvailability: [],
+      sourceFreshness: [],
+      latestSamplesByType: [],
+      recentDailyMetrics: [],
+      recentWorkouts: [],
+      coachDataInstruction:
+        'The web demo dataset was cleared. Treat health data as unavailable until a new demo or native sync is connected.',
+    };
+  }
+
   const firstDate = dateKey(-13);
   const syncRuns = lastSync
     ? {
@@ -580,6 +613,7 @@ export async function getRecentWorkouts(): Promise<WorkoutRow[]> {
 }
 
 export async function clearPipeline(): Promise<void> {
+  demoCleared = true;
   lastSync = null;
   syncRuns = [];
 }

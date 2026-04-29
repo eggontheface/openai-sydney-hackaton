@@ -1,8 +1,9 @@
 import type { DailyMetrics, PipelineSnapshot } from '../health/types';
 import { formatDuration } from '../lib/dates';
 import type { CoachHealthContext } from '../storage/trainingStore';
+import type { TrainingPlan } from '../coach/planEngine';
 
-export const openAiCoachModel = 'gpt-5.5';
+export const openAiCoachModel = 'gpt-5.2';
 
 export type OpenAiCoachConversationMessage = {
   role: 'assistant' | 'user';
@@ -29,7 +30,10 @@ const coachInstructions = [
   'You are BioStream, a practical health and fitness coach inside a private mobile app.',
   'Use only the supplied local health summary and conversation. Do not pretend to see data that is absent.',
   'The SQLite table inventory is authoritative for whether synced health data exists. If it says synced rows exist, never say no health data is synced.',
-  'Give concise coaching guidance for today. Keep replies to 2-5 short sentences and ask at most one follow-up question.',
+  'The rendered app cards already show exact metrics and the workout details. Do not simply repeat those values; interpret what they mean for the athlete.',
+  'The supplied training plan is a deterministic scaffold with safety guardrails. Use it as the current plan, but discuss trade-offs, substitutions, and adaptations naturally.',
+  'If the user wants to change the plan, explain the safest adjustment and what should be confirmed before the app mutates the plan.',
+  'Give concise coaching guidance for today or the broader plan. Keep replies to 2-5 short sentences and ask at most one follow-up question.',
   'Be conservative with pain, injury, illness, fever, chest pain, fainting, unusual shortness of breath, or severe fatigue. In those cases lower intensity and suggest professional care when symptoms are serious, sharp, worsening, chest-related, or unusual.',
   'Do not diagnose, prescribe treatment, or make emergency claims. Separate what the data supports from what remains uncertain.',
   'When data is stale or missing, say so plainly and use a safer recommendation.',
@@ -95,7 +99,49 @@ function hrvContext(day: DailyMetrics) {
   };
 }
 
-function buildCoachContext(snapshot: PipelineSnapshot, healthContext: CoachHealthContext) {
+function buildPlanContext(goalText: string | undefined, plan: TrainingPlan | undefined) {
+  if (!plan) {
+    return {
+      userGoal: goalText?.trim() || null,
+      currentPlanAvailable: false,
+    };
+  }
+
+  return {
+    userGoal: goalText?.trim() || null,
+    currentPlanAvailable: true,
+    goalType: plan.goal,
+    whyToday: plan.whyToday,
+    guardrail: plan.guardrail,
+    today: {
+      label: plan.today.label,
+      title: plan.today.title,
+      detail: plan.today.detail,
+      sport: plan.today.sport,
+      capture: plan.today.capture,
+      intensity: plan.today.intensity,
+      durationMinutes: plan.today.durationMinutes,
+      reason: plan.today.reason,
+      metrics: plan.today.metrics,
+    },
+    week: plan.week.map((workout) => ({
+      label: workout.label,
+      day: workout.day,
+      title: workout.title,
+      sport: workout.sport,
+      intensity: workout.intensity,
+      durationMinutes: workout.durationMinutes,
+      reason: workout.reason,
+    })),
+  };
+}
+
+function buildCoachContext(
+  snapshot: PipelineSnapshot,
+  healthContext: CoachHealthContext,
+  goalText?: string,
+  plan?: TrainingPlan,
+) {
   return {
     generatedAt: new Date().toISOString(),
     dataAvailability: {
@@ -111,6 +157,7 @@ function buildCoachContext(snapshot: PipelineSnapshot, healthContext: CoachHealt
       coverageDays: snapshot.coverageDays,
     },
     currentRecommendation: snapshot.recommendation,
+    planContext: buildPlanContext(goalText, plan),
     sourceFreshness: snapshot.sourceFreshness.map((source) => ({
       domain: source.domain,
       label: source.label,
@@ -207,12 +254,16 @@ function buildCoachContext(snapshot: PipelineSnapshot, healthContext: CoachHealt
 
 function buildCoachInput({
   conversation,
+  goalText,
   healthContext,
+  plan,
   snapshot,
   userMessage,
 }: {
   conversation: OpenAiCoachConversationMessage[];
+  goalText?: string;
   healthContext: CoachHealthContext;
+  plan?: TrainingPlan;
   snapshot: PipelineSnapshot;
   userMessage: string;
 }): string {
@@ -220,7 +271,7 @@ function buildCoachInput({
 
   return [
     'Local health summary:',
-    JSON.stringify(buildCoachContext(snapshot, healthContext), null, 2),
+    JSON.stringify(buildCoachContext(snapshot, healthContext, goalText, plan), null, 2),
     '',
     'Recent conversation:',
     recentConversation.length
@@ -234,14 +285,18 @@ function buildCoachInput({
 export async function sendCoachMessage({
   apiKey,
   conversation,
+  goalText,
   healthContext,
+  plan,
   previousResponseId,
   snapshot,
   userMessage,
 }: {
   apiKey: string;
   conversation: OpenAiCoachConversationMessage[];
+  goalText?: string;
   healthContext: CoachHealthContext;
+  plan?: TrainingPlan;
   previousResponseId?: string | null;
   snapshot: PipelineSnapshot;
   userMessage: string;
@@ -249,7 +304,7 @@ export async function sendCoachMessage({
   const payload: Record<string, unknown> = {
     model: openAiCoachModel,
     instructions: coachInstructions,
-    input: buildCoachInput({ conversation, healthContext, snapshot, userMessage }),
+    input: buildCoachInput({ conversation, goalText, healthContext, plan, snapshot, userMessage }),
     max_output_tokens: 1200,
     reasoning: { effort: 'high' },
     truncation: 'auto',

@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { Activity, ArrowRight, MoreHorizontal, RefreshCw } from 'lucide-react-native';
 
-import { generateTrainingPlan } from '../coach/planEngine';
+import { generateTrainingPlan, resolveTrainingGoal } from '../coach/planEngine';
 import { dataAge, formatDateKey, formatNumber, hrvMetricLabel, toneColor } from '../core/formatters';
 import type { CoachConversationMessage, LastSync } from '../core/types';
 import type { PipelineSnapshot } from '../health/types';
@@ -20,10 +20,25 @@ import { styles } from '../styles/appStyles';
 import { tokens } from '../theme/tokens';
 import { AppButton, CoachAvatar, CoachLine, DataCard, SmallMetric, UserBubble } from '../ui/primitives';
 
+function coachGoalPhrase(goalText: string): string {
+  const goal = goalText.trim().replace(/[.!?]+$/, '');
+  const normalized = goal.toLowerCase();
+
+  if (!goal) return 'your training goal';
+  if (normalized.includes('half marathon')) return 'your half marathon goal';
+  if (normalized.includes('marathon')) return 'your marathon goal';
+  if (normalized.includes('hyrox')) return 'your HYROX goal';
+  if (normalized.includes('strength')) return 'your strength goal';
+  if (normalized.includes('fitness')) return 'your fitness goal';
+
+  return goal;
+}
+
 export function CoachScreen({
   coachBusy,
   coachDraft,
   coachMessages,
+  goalText,
   hasOpenAiApiKey,
   snapshot,
   lastSync,
@@ -38,6 +53,7 @@ export function CoachScreen({
   coachBusy: boolean;
   coachDraft: string;
   coachMessages: CoachConversationMessage[];
+  goalText: string;
   hasOpenAiApiKey: boolean;
   snapshot: PipelineSnapshot;
   lastSync: LastSync;
@@ -52,25 +68,49 @@ export function CoachScreen({
   const current = snapshot.today;
   const recommendation = snapshot.recommendation;
   const accent = toneColor(recommendation.color);
-  const plan = useMemo(() => generateTrainingPlan(snapshot, 'run'), [snapshot]);
+  const plan = useMemo(
+    () => generateTrainingPlan(snapshot, resolveTrainingGoal(goalText)),
+    [goalText, snapshot],
+  );
   const sleep = current?.sleepSeconds ? formatDurationFromDates(current.sleepSeconds) : '—';
   const hrv = current?.hrvLastNightAvg ? `${Math.round(current.hrvLastNightAvg)} ms` : '—';
   const hrvLabel = hrvMetricLabel(current);
   const rhr = current?.restingHr ? `${Math.round(current.restingHr)} bpm` : '—';
-  const quickReplies = ['Make it easier', 'Move it to tomorrow', "I'm short on time"];
-  const coachInputDisabled = coachBusy || busy || !hasOpenAiApiKey;
-  const canSendCoachMessage = hasOpenAiApiKey && !coachBusy && !busy && Boolean(coachDraft.trim());
+  const athleteName = 'Martin';
+  const goalPhrase = coachGoalPhrase(goalText);
+  const wearableLabel =
+    Platform.OS === 'ios'
+      ? 'Apple Watch'
+      : Platform.OS === 'android'
+        ? 'connected wearable'
+        : 'wearable data';
+  const sourceLabel =
+    Platform.OS === 'ios'
+      ? 'Apple Health'
+      : Platform.OS === 'android'
+        ? 'Health Connect'
+        : 'web demo data';
+  const quickReplies = [
+    'Talk me through the week',
+    'What should we adjust?',
+    'I feel different today',
+  ];
+  const coachInputDisabled = coachBusy || busy;
+  const canSendCoachMessage = !coachBusy && !busy && Boolean(coachDraft.trim());
   const composerPlaceholder = hasOpenAiApiKey
     ? busy
       ? 'Sync in progress...'
       : 'Ask your coach...'
-    : 'Save an OpenAI API key in You to chat';
+    : 'Ask your coach...';
   const hasSyncedData =
     snapshot.totalSamples > 0 ||
     snapshot.workoutCount > 0 ||
     snapshot.sleepCount > 0 ||
     snapshot.nutritionDays > 0 ||
     snapshot.coverageDays > 0;
+  const coachGreeting = hasSyncedData
+    ? `Good morning ${athleteName}. You are in a good spot to keep building toward ${goalPhrase}. I have checked the recovery picture and lined up today's work. If anything has changed since the data came in, tell me and I will adjust it.`
+    : `Good morning ${athleteName}. Let's keep building toward ${goalPhrase}. I do not have enough wearable history yet, so I will keep things sensible and adjust as you give me more context.`;
   const feedRef = useRef<ScrollView | null>(null);
 
   function scrollFeedToEnd(animated = true) {
@@ -112,12 +152,12 @@ export function CoachScreen({
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.dateDivider}>This morning</Text>
-        <CoachLine first>Good morning Martin.</CoachLine>
+        <CoachLine first>{coachGreeting}</CoachLine>
 
         <DataCard accent={accent} inset label="Sleep & recovery">
           <View style={styles.sourceLine}>
             <Text style={styles.sourceLineText}>
-              {current?.hasSleep ? 'Apple Watch' : 'Waiting for wearable data'}
+              {current?.hasSleep ? wearableLabel : 'Waiting for wearable data'}
             </Text>
             <Text style={styles.sourceLineText}>{dataAge(lastSync)}</Text>
           </View>
@@ -144,7 +184,7 @@ export function CoachScreen({
                   <Text style={styles.coachPlanStat}>{plan.today.intensity}</Text>
                 </View>
                 <Text style={styles.planDetail}>
-                  Your Apple Watch will capture distance, pace, heart rate, route, splits, and duration.
+                  Your {wearableLabel} will capture distance, pace, heart rate, route, splits, and duration.
                 </Text>
               </View>
               <ArrowRight color={tokens.muted} size={17} strokeWidth={2} />
@@ -167,14 +207,14 @@ export function CoachScreen({
         {!hasSyncedData ? (
           <DataCard accent={tokens.accent} inset label="Datasource">
             <Text style={styles.helpText}>
-              Health Connect is the source of truth. Syncing creates raw schema rows,
+              {sourceLabel} is the source of truth. Syncing creates raw schema rows,
               then derives daily coaching metrics locally on this device.
             </Text>
             <View style={styles.singleAction}>
               <AppButton
                 disabled={busy}
                 icon={RefreshCw}
-                label={busy ? status : 'Sync Health Connect'}
+                label={busy ? status : `Sync ${sourceLabel}`}
                 onPress={onSync}
                 variant="primary"
               />

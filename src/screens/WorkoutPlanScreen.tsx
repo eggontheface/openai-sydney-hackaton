@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import {
   Activity,
@@ -12,7 +12,7 @@ import {
   type LucideIcon,
 } from 'lucide-react-native';
 
-import { generateTrainingPlan, type PlannedWorkout } from '../coach/planEngine';
+import { generateTrainingPlan, resolveTrainingGoal, type PlannedWorkout } from '../coach/planEngine';
 import type { PipelineSnapshot } from '../health/types';
 import { styles } from '../styles/appStyles';
 import { tokens } from '../theme/tokens';
@@ -135,22 +135,42 @@ function PlanDayRow({
   );
 }
 
-export function WorkoutPlanScreen({ snapshot }: { snapshot: PipelineSnapshot }) {
-  const plan = useMemo(() => generateTrainingPlan(snapshot, 'run'), [snapshot]);
+export function WorkoutPlanScreen({ goalText, snapshot }: { goalText: string; snapshot: PipelineSnapshot }) {
+  const plan = useMemo(
+    () => generateTrainingPlan(snapshot, resolveTrainingGoal(goalText)),
+    [goalText, snapshot],
+  );
   const [selectedId, setSelectedId] = useState(plan.today.id);
+  const [actionMessage, setActionMessage] = useState('');
   const selected = plan.week.find((workout) => workout.id === selectedId) ?? plan.today;
   const TodayIcon = workoutIconFor(plan.today);
+  const wearableLabel =
+    Platform.OS === 'ios'
+      ? 'Apple Watch'
+      : Platform.OS === 'android'
+        ? 'connected wearable'
+        : 'demo wearable';
 
   return (
     <View style={styles.screen}>
       <View style={styles.workoutTopBar}>
-        <View style={styles.roundIconButton}>
+        <Pressable
+          accessibilityLabel="Ask coach about workout"
+          accessibilityRole="button"
+          onPress={() => setActionMessage('Use the coach box below to ask about today or the week.')}
+          style={styles.roundIconButton}
+        >
           <Sparkles color={tokens.ink} size={16} strokeWidth={2} />
-        </View>
+        </Pressable>
         <SectionLabel>Workout</SectionLabel>
-        <View style={styles.roundIconButton}>
+        <Pressable
+          accessibilityLabel="Workout options"
+          accessibilityRole="button"
+          onPress={() => setActionMessage('Workout options are coming with native scheduling and wearable start integration.')}
+          style={styles.roundIconButton}
+        >
           <MoreHorizontal color={tokens.ink} size={16} strokeWidth={2} />
-        </View>
+        </Pressable>
       </View>
       <ScrollView contentContainerStyle={styles.workoutContent} showsVerticalScrollIndicator={false}>
         <Text style={styles.workoutIntro}>Today · built from readiness</Text>
@@ -177,7 +197,7 @@ export function WorkoutPlanScreen({ snapshot }: { snapshot: PipelineSnapshot }) 
           <View style={styles.capturePanel}>
             <View style={styles.captureTitleRow}>
               <Moon color={tokens.inkSoft} size={13} strokeWidth={2} />
-              <Text style={styles.captureTitle}>Captured by Apple Watch</Text>
+              <Text style={styles.captureTitle}>Captured by {wearableLabel}</Text>
             </View>
             <Text style={styles.planDetail}>
               Distance, pace, heart rate, route, splits, and duration will be recorded automatically.
@@ -205,13 +225,32 @@ export function WorkoutPlanScreen({ snapshot }: { snapshot: PipelineSnapshot }) 
 
         <WorkoutDetail workout={selected} />
         <CoachDock plan={plan} />
+        {actionMessage ? (
+          <View style={styles.warningPanel}>
+            <Text style={styles.warningText}>{actionMessage}</Text>
+          </View>
+        ) : null}
       </ScrollView>
       <View style={styles.workoutActions}>
-        <Pressable accessibilityRole="button" style={styles.startWatchButton}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() =>
+            setActionMessage(
+              Platform.OS === 'web'
+                ? 'Starting on a wearable is available in a native mobile build.'
+                : 'Wearable start is queued for native workout integration.',
+            )
+          }
+          style={styles.startWatchButton}
+        >
           <Moon color={tokens.surface} size={16} strokeWidth={2} />
-          <Text style={styles.startWatchText}>Start on Watch</Text>
+          <Text style={styles.startWatchText}>Start on wearable</Text>
         </Pressable>
-        <Pressable accessibilityRole="button" style={styles.scheduleButton}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setActionMessage(`${selected.title} is ready to schedule once calendar integration is connected.`)}
+          style={styles.scheduleButton}
+        >
           <Text style={styles.scheduleText}>Schedule</Text>
         </Pressable>
       </View>

@@ -2,7 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 
 export type AppSettings = {
   hasOpenAiApiKey: boolean;
-  openAiApiKeySource: 'secure_store' | 'env' | null;
+  openAiApiKeySource: 'secure_store' | 'local_storage' | 'env' | null;
   defaultSyncRangeDays: number;
 };
 

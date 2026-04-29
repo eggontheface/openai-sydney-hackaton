@@ -3,7 +3,7 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { Activity, ArrowRight, Dumbbell, Route } from 'lucide-react-native';
 
-import { generateTrainingPlan } from '../coach/planEngine';
+import { generateTrainingPlan, resolveTrainingGoal } from '../coach/planEngine';
 import { formatDateKey, formatNumber, hrvMetricLabel } from '../core/formatters';
 import type { DailyMetrics, PipelineSnapshot, WorkoutRecord } from '../health/types';
 import { formatDuration, formatShortDateTime } from '../lib/dates';
@@ -138,7 +138,118 @@ function SignalTrendChart({ history }: { history: DailyMetrics[] }) {
   );
 }
 
-export function HistoryScreen({ snapshot }: { snapshot: PipelineSnapshot }) {
+function HistorySignalPanel({
+  activeSignal,
+  history,
+  today,
+}: {
+  activeSignal: string;
+  history: DailyMetrics[];
+  today: DailyMetrics | null;
+}) {
+  if (activeSignal === 'Strain') {
+    const recent = history.slice(0, 7).reverse();
+    const strainData = recent.map((day) => day.activityElapsedSeconds ?? day.steps ?? 0);
+
+    return (
+      <>
+        <DataCard accent={tokens.ink} label="Training load">
+          <Text style={styles.historyMiniValue}>{formatDuration(today?.activityElapsedSeconds)}</Text>
+          <View style={styles.miniSparkWrap}>
+            <Sparkline color={tokens.ink} data={strainData.length ? strainData : [0]} />
+          </View>
+        </DataCard>
+        <View style={styles.historyMiniGrid}>
+          <View style={styles.historyMiniColumn}>
+            <DataCard accent={tokens.cool} label="Active kcal">
+              <Text style={styles.historyMiniValue}>{formatNumber(today?.activeKcal)}</Text>
+            </DataCard>
+          </View>
+          <View style={styles.historyMiniColumn}>
+            <DataCard accent={tokens.ink} label="Distance">
+              <Text style={styles.historyMiniValue}>{formatNumber(today?.distanceKm, 1)} km</Text>
+            </DataCard>
+          </View>
+        </View>
+      </>
+    );
+  }
+
+  if (activeSignal === 'Sleep') {
+    return (
+      <View style={styles.historyMiniGrid}>
+        <View style={styles.historyMiniColumn}>
+          <DataCard accent={tokens.cool} label="Sleep">
+            <Text style={styles.historyMiniValue}>{formatDuration(today?.sleepSeconds)}</Text>
+            <View style={styles.sleepBars}>
+              {history.slice(0, 7).reverse().map((day) => {
+                const hours = (day.sleepSeconds ?? 0) / 3600;
+                return (
+                  <View
+                    key={day.date}
+                    style={[styles.sleepBar, { height: Math.max(8, Math.min(34, hours * 4)) }]}
+                  />
+                );
+              })}
+            </View>
+          </DataCard>
+        </View>
+        <View style={styles.historyMiniColumn}>
+          <DataCard accent={tokens.ink} label="Efficiency">
+            <Text style={styles.historyMiniValue}>
+              {today?.sleepEfficiency == null ? '—' : `${formatNumber(today.sleepEfficiency * 100)}%`}
+            </Text>
+          </DataCard>
+        </View>
+      </View>
+    );
+  }
+
+  if (activeSignal === 'Body') {
+    return (
+      <View style={styles.historyMiniGrid}>
+        <View style={styles.historyMiniColumn}>
+          <DataCard accent={tokens.ink} label="Weight">
+            <Text style={styles.historyMiniValue}>{formatNumber(today?.weightKg, 1)} kg</Text>
+          </DataCard>
+        </View>
+        <View style={styles.historyMiniColumn}>
+          <DataCard accent={tokens.cool} label="VO2 max">
+            <Text style={styles.historyMiniValue}>{formatNumber(today?.vo2max, 0)}</Text>
+          </DataCard>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <>
+      <SignalTrendChart history={history} />
+      <View style={styles.historyMiniGrid}>
+        <View style={styles.historyMiniColumn}>
+          <DataCard accent={tokens.cool} label="Sleep">
+            <Text style={styles.historyMiniValue}>{formatDuration(today?.sleepSeconds)}</Text>
+            <View style={styles.sleepBars}>
+              {[0.62, 0.72, 0.66, 0.7, 0.55, 0.61, 0.82].map((height, index) => (
+                <View key={index} style={[styles.sleepBar, { height: 34 * height }]} />
+              ))}
+            </View>
+          </DataCard>
+        </View>
+        <View style={styles.historyMiniColumn}>
+          <DataCard accent={tokens.ink} label="RHR">
+            <Text style={styles.historyMiniValue}>{formatNumber(today?.restingHr)} bpm</Text>
+            <View style={styles.miniSparkWrap}>
+              <Sparkline color={tokens.muted} data={[53, 51, 52, 50, 54, 55, today?.restingHr ?? 53]} />
+            </View>
+          </DataCard>
+        </View>
+      </View>
+    </>
+  );
+}
+
+export function HistoryScreen({ goalText, snapshot }: { goalText: string; snapshot: PipelineSnapshot }) {
   const [activeSignal, setActiveSignal] = useState('Recovery');
   const today = snapshot.today;
   const imported = snapshot.recentWorkouts.length
@@ -175,28 +286,7 @@ export function HistoryScreen({ snapshot }: { snapshot: PipelineSnapshot }) {
           <SmallMetric label="Nutrition days" value={formatNumber(snapshot.nutritionDays)} />
         </View>
 
-        <SignalTrendChart history={snapshot.history} />
-
-        <View style={styles.historyMiniGrid}>
-          <View style={styles.historyMiniColumn}>
-            <DataCard accent={tokens.cool} label="Sleep">
-              <Text style={styles.historyMiniValue}>{formatDuration(today?.sleepSeconds)}</Text>
-              <View style={styles.sleepBars}>
-                {[0.62, 0.72, 0.66, 0.7, 0.55, 0.61, 0.82].map((height, index) => (
-                  <View key={index} style={[styles.sleepBar, { height: 34 * height }]} />
-                ))}
-              </View>
-            </DataCard>
-          </View>
-          <View style={styles.historyMiniColumn}>
-            <DataCard accent={tokens.ink} label="RHR">
-              <Text style={styles.historyMiniValue}>{formatNumber(today?.restingHr)} bpm</Text>
-              <View style={styles.miniSparkWrap}>
-                <Sparkline color={tokens.muted} data={[53, 51, 52, 50, 54, 55, today?.restingHr ?? 53]} />
-              </View>
-            </DataCard>
-          </View>
-        </View>
+        <HistorySignalPanel activeSignal={activeSignal} history={snapshot.history} today={today} />
 
         <SectionLabel>Imported from Strava</SectionLabel>
         <View style={styles.listCard}>
@@ -207,7 +297,7 @@ export function HistoryScreen({ snapshot }: { snapshot: PipelineSnapshot }) {
           )}
         </View>
       </ScrollView>
-      <CoachDock plan={generateTrainingPlan(snapshot, 'run')} />
+      <CoachDock plan={generateTrainingPlan(snapshot, resolveTrainingGoal(goalText))} />
     </View>
   );
 }

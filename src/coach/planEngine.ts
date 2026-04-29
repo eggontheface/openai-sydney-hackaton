@@ -29,6 +29,29 @@ type DayTemplate = Omit<PlannedWorkout, 'id' | 'day' | 'label'>;
 
 const dayMs = 24 * 60 * 60 * 1000;
 
+export function resolveTrainingGoal(goalText: string): TrainingGoal {
+  const text = goalText.toLowerCase();
+
+  if (text.includes('hyrox') || text.includes('triathlon') || text.includes('event')) {
+    return 'event';
+  }
+
+  if (text.includes('cycle') || text.includes('cycling') || text.includes('bike')) {
+    return 'cycle';
+  }
+
+  if (
+    text.includes('strength') ||
+    text.includes('muscle') ||
+    text.includes('lift') ||
+    text.includes('hypertrophy')
+  ) {
+    return 'muscle';
+  }
+
+  return 'run';
+}
+
 function addDays(date: Date, offset: number) {
   return new Date(date.getTime() + offset * dayMs);
 }

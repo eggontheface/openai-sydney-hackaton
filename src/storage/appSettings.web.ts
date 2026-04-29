@@ -1,6 +1,6 @@
 export type AppSettings = {
   hasOpenAiApiKey: boolean;
-  openAiApiKeySource: 'secure_store' | 'env' | null;
+  openAiApiKeySource: 'secure_store' | 'local_storage' | 'env' | null;
   defaultSyncRangeDays: number;
 };
 
@@ -66,7 +66,7 @@ export async function loadAppSettings(): Promise<AppSettings> {
 
   return {
     hasOpenAiApiKey: Boolean(apiKey || envApiKey),
-    openAiApiKeySource: apiKey ? 'secure_store' : envApiKey ? 'env' : null,
+    openAiApiKeySource: apiKey ? 'local_storage' : envApiKey ? 'env' : null,
     defaultSyncRangeDays: settings.defaultSyncRangeDays ?? 365,
   };
 }

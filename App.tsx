@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Keyboard, KeyboardAvoidingView, Platform, SafeAreaView } from 'react-native';
 
 import { openAiCoachModel, sendCoachMessage } from './src/ai/openaiCoach';
+import { generateTrainingPlan, resolveTrainingGoal } from './src/coach/planEngine';
 import { createCoachMessage, toOpenAiConversation } from './src/core/coachConversation';
 import { baselineRangeDays, emptyAppSettings, emptySnapshot } from './src/core/constants';
 import type { CoachConversationMessage, LastSync, SyncRuns, Tab } from './src/core/types';
@@ -148,16 +149,22 @@ export default function App() {
       return;
     }
 
-    const apiKey = await readOpenAiApiKey();
-    if (!apiKey) {
-      setStatus('Save an OpenAI API key in You before messaging the coach.');
-      return;
-    }
-
     const userMessage = createCoachMessage('user', text);
     const requestConversation = toOpenAiConversation(coachMessages);
 
     setCoachDraft('');
+
+    const apiKey = await readOpenAiApiKey();
+    if (!apiKey) {
+      setStatus('Save an OpenAI API key in You before messaging the coach.');
+      setCoachMessages((messages) => [
+        ...messages,
+        userMessage,
+        createCoachMessage('coach', localCoachFallback(text)),
+      ]);
+      return;
+    }
+
     setCoachMessages((messages) => [...messages, userMessage]);
     setCoachBusy(true);
     setStatus(`Coach is checking SQLite health data with ${openAiCoachModel}`);
@@ -165,11 +172,14 @@ export default function App() {
     try {
       const freshSnapshot = await getPipelineSnapshot();
       const healthContext = await getCoachHealthContext({ rebuildDaily: false });
+      const plan = generateTrainingPlan(freshSnapshot, resolveTrainingGoal(goalText));
       setSnapshot(freshSnapshot);
       const response = await sendCoachMessage({
         apiKey,
         conversation: requestConversation,
+        goalText,
         healthContext,
+        plan,
         previousResponseId: coachResponseId,
         snapshot: freshSnapshot,
         userMessage: text,
@@ -193,6 +203,32 @@ export default function App() {
     } finally {
       setCoachBusy(false);
     }
+  }
+
+  function localCoachFallback(message: string): string {
+    const normalized = message.toLowerCase();
+    const mentionsPain =
+      normalized.includes('pain') ||
+      normalized.includes('sore') ||
+      normalized.includes('knee') ||
+      normalized.includes('niggle') ||
+      normalized.includes('injur');
+    const mentionsFatigue =
+      normalized.includes('tired') ||
+      normalized.includes('fatigue') ||
+      normalized.includes('exhausted') ||
+      normalized.includes('sick') ||
+      normalized.includes('ill');
+
+    if (mentionsPain) {
+      return 'Yes. Put the knee first today: swap impact work for an easy walk, bike, or mobility session, and keep discomfort at a very low level. Stop if it is sharp, worsening, swollen, or changes your gait; if it persists, skip running and get it checked. Save an OpenAI API key in You when you want me to talk through the full plan trade-off properly.';
+    }
+
+    if (mentionsFatigue) {
+      return 'Yes. Treat that as useful context and downshift today: reduce duration, keep intensity easy, or move the session to tomorrow. The plan should adapt to how you feel, not just what the wearable says. Save an OpenAI API key in You when you want a proper back-and-forth on the broader plan.';
+    }
+
+    return 'I have captured that context. The cards show the data, but this is the kind of detail I should use to adapt the plan. Save an OpenAI API key in You when you want a proper AI coaching conversation around it.';
   }
 
   function makeIncrementalSyncRange(lastSuccessful: LastSync): SyncRange | null {
@@ -317,6 +353,7 @@ export default function App() {
             coachBusy={coachBusy}
             coachDraft={coachDraft}
             coachMessages={coachMessages}
+            goalText={goalText}
             hasOpenAiApiKey={appSettings.hasOpenAiApiKey}
             lastSync={lastSync}
             onChangeCoachDraft={setCoachDraft}
@@ -328,8 +365,12 @@ export default function App() {
             warnings={warnings}
           />
         ) : null}
-        {hasCompletedOnboarding && activeTab === 'workout' ? <WorkoutPlanScreen snapshot={snapshot} /> : null}
-        {hasCompletedOnboarding && activeTab === 'history' ? <HistoryScreen snapshot={snapshot} /> : null}
+        {hasCompletedOnboarding && activeTab === 'workout' ? (
+          <WorkoutPlanScreen goalText={goalText} snapshot={snapshot} />
+        ) : null}
+        {hasCompletedOnboarding && activeTab === 'history' ? (
+          <HistoryScreen goalText={goalText} snapshot={snapshot} />
+        ) : null}
         {hasCompletedOnboarding && activeTab === 'you' ? (
           <SourceScreen
             apiKeyDraft={apiKeyDraft}
@@ -353,16 +394,10 @@ export default function App() {
             status={status}
           />
         ) : null}
-        {!keyboardVisible ? (
+        {hasCompletedOnboarding && !keyboardVisible ? (
           <TabBar
-            active={hasCompletedOnboarding ? activeTab : 'coach'}
-            onChange={(tab) => {
-              if (hasCompletedOnboarding) {
-                setActiveTab(tab);
-              } else {
-                setActiveTab('coach');
-              }
-            }}
+            active={activeTab}
+            onChange={setActiveTab}
           />
         ) : null}
       </KeyboardAvoidingView>

@@ -255,9 +255,17 @@ export function SourceScreen({
   onSetDefaultRange: (value: number) => void;
 }) {
   const sourceLabel = currentHealthProviderLabel();
+  const canRunNativeSync = Platform.OS === 'ios' || Platform.OS === 'android';
+  const displaySourceLabel = canRunNativeSync ? sourceLabel : 'Web preview';
+  const pipelineTitle = canRunNativeSync ? 'Local health pipeline' : 'Browser demo dataset';
+  const pipelineText = canRunNativeSync
+    ? `Reads ${sourceLabel} records into schema tables, then derives the coaching surface from daily rollups. Nothing leaves the device from this app.`
+    : 'The web preview uses a local mock PipelineSnapshot so the demo can run in the browser. Real Apple Health or Health Connect sync requires a native mobile build.';
   const apiKeyStatus =
     appSettings.openAiApiKeySource === 'secure_store'
       ? 'Saved on this device'
+      : appSettings.openAiApiKeySource === 'local_storage'
+        ? 'Saved in browser local storage'
       : appSettings.openAiApiKeySource === 'env'
         ? 'Loaded from .env'
         : 'Not saved';
@@ -316,7 +324,7 @@ export function SourceScreen({
     <View style={styles.screen}>
       <View style={styles.pageHeader}>
         <Text style={styles.pageEyebrow}>Datasource</Text>
-        <Text style={styles.pageTitle}>{sourceLabel}</Text>
+        <Text style={styles.pageTitle}>{displaySourceLabel}</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.pageContent} showsVerticalScrollIndicator={false}>
@@ -328,11 +336,8 @@ export function SourceScreen({
               <Shield color={tokens.accent} size={26} strokeWidth={2} />
             )}
           </View>
-          <Text style={styles.connectTitle}>Local API pipeline</Text>
-          <Text style={styles.connectText}>
-            Reads Health Connect records into schema tables, then derives the coaching
-            surface from daily rollups. Nothing leaves the device from this app.
-          </Text>
+          <Text style={styles.connectTitle}>{pipelineTitle}</Text>
+          <Text style={styles.connectText}>{pipelineText}</Text>
           <Text style={styles.connectMeta}>
             {status} · {dataAge(lastSync)}
           </Text>
@@ -360,9 +365,9 @@ export function SourceScreen({
 
         <View style={styles.actionsRow}>
           <AppButton
-            disabled={busy}
+            disabled={busy || !canRunNativeSync}
             icon={RefreshCw}
-            label={busy ? 'Syncing' : 'Sync'}
+            label={busy ? 'Syncing' : canRunNativeSync ? 'Sync' : 'Mobile sync only'}
             onPress={onSync}
             variant="primary"
           />
