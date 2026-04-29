@@ -1,5 +1,7 @@
 import type {
   CanonicalType,
+  CoachRecommendation,
+  DailyCheckIn,
   DailyMetrics,
   HealthConnectReadDiagnostic,
   HealthProvider,
@@ -11,6 +13,11 @@ import type {
 } from "../health/types";
 import { emptySnapshot } from "../core/constants";
 import { completeCoachRecommendation } from "../coach/dailyRecommendation";
+import {
+  buildDailyCheckInContextSignals,
+  normalizeDailyCheckIn,
+  painRiskFlagFor,
+} from "../coach/dailyCheckIn";
 import { buildReadinessStatus } from "../coach/readinessStatus";
 import { buildTrainingLoadSnapshot } from "../coach/trainingLoad";
 import { buildPipelineExportArtifacts } from "../export/pipelineExport";
@@ -154,6 +161,122 @@ function day(offset = 0): DailyMetrics {
 
 const history = Array.from({ length: 14 }, (_, index) => day(-index));
 const latestDate = dateKey(0);
+const dailyCheckInStorageKey = "biostream.dailyCheckIns";
+
+function readCheckInHistory(): DailyCheckIn[] {
+  if (typeof localStorage === "undefined") return [];
+
+  try {
+    const parsed = JSON.parse(
+      localStorage.getItem(dailyCheckInStorageKey) ?? "[]",
+    );
+    return Array.isArray(parsed)
+      ? parsed
+          .map((item) =>
+            normalizeDailyCheckIn(
+              item,
+              item?.localDate ?? latestDate,
+              item?.updatedAt,
+            ),
+          )
+          .sort((a, b) => b.localDate.localeCompare(a.localDate))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeCheckInHistory(checkIns: DailyCheckIn[]): void {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(dailyCheckInStorageKey, JSON.stringify(checkIns));
+}
+
+function daysSinceLocalDate(localDate: string | undefined): number | undefined {
+  if (!localDate) return undefined;
+
+  const latest = Date.parse(`${latestDate}T00:00:00.000Z`);
+  const value = Date.parse(`${localDate}T00:00:00.000Z`);
+  if (Number.isNaN(latest) || Number.isNaN(value)) return undefined;
+
+  return Math.max(0, Math.round((latest - value) / dayMs));
+}
+
+function checkInSourceFreshness(checkIns: DailyCheckIn[]): SourceFreshness {
+  const latest = checkIns[0];
+  const latestLocalDate = latest?.localDate;
+  const ageDays = daysSinceLocalDate(latestLocalDate);
+
+  return {
+    domain: "check_ins",
+    label: "Check-ins",
+    state: latest
+      ? latestLocalDate === latestDate
+        ? "fresh"
+        : "stale"
+      : "missing",
+    canonicalTypes: [],
+    sampleCount: checkIns.length,
+    dayCount: new Set(checkIns.map((checkIn) => checkIn.localDate)).size,
+    latestLocalDate,
+    lastUpdatedAt: latest?.updatedAt,
+    ageDays,
+    limitations: latest
+      ? ["User-reported context, separate from imported wearable data."]
+      : ["No user-reported daily check-ins are saved in this web demo."],
+  };
+}
+
+function sourceFreshnessWithCheckIns(
+  checkIns: DailyCheckIn[],
+): SourceFreshness[] {
+  return [
+    ...demoSourceFreshness.filter((source) => source.domain !== "check_ins"),
+    checkInSourceFreshness(checkIns),
+  ];
+}
+
+function recommendationWithCheckIn(
+  recommendation: CoachRecommendation,
+  checkIn: DailyCheckIn | null,
+): CoachRecommendation {
+  const checkInSignals = buildDailyCheckInContextSignals(checkIn);
+  const painRisk = painRiskFlagFor(checkIn);
+  if (!checkInSignals.length) return recommendation;
+  const painReadinessStatus = painRisk
+    ? buildReadinessStatus({
+        score: Math.min(
+          recommendation.readinessStatus.score ??
+            recommendation.readiness ??
+            44,
+          44,
+        ),
+        signalsUsed: [...recommendation.sourcesUsed, painRisk],
+      })
+    : recommendation.readinessStatus;
+
+  return completeCoachRecommendation(
+    {
+      ...recommendation,
+      readiness: painRisk
+        ? painReadinessStatus.score
+        : recommendation.readiness,
+      readinessStatus: painRisk
+        ? painReadinessStatus
+        : recommendation.readinessStatus,
+      readinessLabel: painRisk ? "Pain flag" : recommendation.readinessLabel,
+      color: painRisk ? "warm" : recommendation.color,
+      title: painRisk ? "Pain-aware easy day" : recommendation.title,
+      detail: painRisk
+        ? "20-30 min walk, mobility, or rest"
+        : recommendation.detail,
+      reason: `${recommendation.reason} User-reported check-in: ${checkInSignals.join(", ")}.`,
+    },
+    {
+      readinessSignals: recommendation.sourcesUsed,
+      contextSignals: checkInSignals,
+    },
+  );
+}
 
 const demoMetricAvailability: MetricAvailability[] = [
   { canonicalType: "sleep_session", sampleCount: 14, dayCount: 14, latestDate },
@@ -388,6 +511,8 @@ const demoSnapshot: PipelineSnapshot = {
   latestDiagnostics: demoDiagnostics,
   today: history[0],
   history,
+  todayCheckIn: null,
+  checkInHistory: [],
   recentWorkouts: [
     {
       workoutId: "demo-run-1",
@@ -502,6 +627,27 @@ export async function clearGoalProfile(): Promise<void> {
   goalProfile = null;
 }
 
+export async function saveDailyCheckIn(
+  draft: Partial<DailyCheckIn>,
+): Promise<DailyCheckIn> {
+  const checkIns = readCheckInHistory();
+  const localDate = draft.localDate ?? latestDate;
+  const current = checkIns.find((checkIn) => checkIn.localDate === localDate);
+  const next = normalizeDailyCheckIn(
+    {
+      ...(current ?? {}),
+      ...draft,
+    },
+    localDate,
+  );
+  const updated = [
+    next,
+    ...checkIns.filter((checkIn) => checkIn.localDate !== localDate),
+  ].sort((a, b) => b.localDate.localeCompare(a.localDate));
+  writeCheckInHistory(updated);
+  return next;
+}
+
 export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
   demoCleared = false;
   return (
@@ -544,7 +690,23 @@ export async function recordSyncRun(
 }
 
 export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
-  return demoCleared ? emptySnapshot : demoSnapshot;
+  if (demoCleared) return emptySnapshot;
+
+  const checkInHistory = readCheckInHistory();
+  const todayCheckIn =
+    checkInHistory.find((checkIn) => checkIn.localDate === latestDate) ?? null;
+  const sourceFreshness = sourceFreshnessWithCheckIns(checkInHistory);
+
+  return {
+    ...demoSnapshot,
+    sourceFreshness,
+    todayCheckIn,
+    checkInHistory,
+    recommendation: recommendationWithCheckIn(
+      demoSnapshot.recommendation,
+      todayCheckIn,
+    ),
+  };
 }
 
 function demoTableCount(
@@ -591,6 +753,7 @@ export async function getCoachHealthContext(
     };
   }
 
+  const snapshot = await getPipelineSnapshot();
   const firstDate = dateKey(-13);
   const syncRuns = lastSync
     ? {
@@ -638,7 +801,7 @@ export async function getCoachHealthContext(
       syncRuns,
     },
     metricAvailability: demoMetricAvailability,
-    sourceFreshness: demoSourceFreshness,
+    sourceFreshness: snapshot.sourceFreshness,
     latestSamplesByType: [
       {
         canonicalType: "hrv_rmssd" as CanonicalType,
@@ -669,8 +832,8 @@ export async function getCoachHealthContext(
         unit: "count",
       },
     ],
-    recentDailyMetrics: demoSnapshot.history.slice(0, 7),
-    recentWorkouts: demoSnapshot.recentWorkouts.slice(0, 5).map((workout) => ({
+    recentDailyMetrics: snapshot.history.slice(0, 7),
+    recentWorkouts: snapshot.recentWorkouts.slice(0, 5).map((workout) => ({
       localDate: workout.localDate,
       name: workout.name,
       activityType: workout.activityType,
@@ -713,7 +876,7 @@ export async function clearPipeline(): Promise<void> {
 }
 
 export async function exportPipelineArtifacts(): Promise<PipelineExportResult> {
-  const artifacts = buildPipelineExportArtifacts(demoSnapshot);
+  const artifacts = buildPipelineExportArtifacts(await getPipelineSnapshot());
 
   return {
     jsonFileUri: `web-demo://${artifacts.jsonFileName}`,

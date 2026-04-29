@@ -1,12 +1,12 @@
-import type { DailyMetrics, PipelineSnapshot } from '../health/types';
-import { formatDuration } from '../lib/dates';
-import type { CoachHealthContext } from '../storage/trainingStore';
-import type { TrainingPlan } from '../coach/planEngine';
+import type { DailyMetrics, PipelineSnapshot } from "../health/types";
+import { formatDuration } from "../lib/dates";
+import type { CoachHealthContext } from "../storage/trainingStore";
+import type { TrainingPlan } from "../coach/planEngine";
 
-export const openAiCoachModel = 'gpt-5.2';
+export const openAiCoachModel = "gpt-5.2";
 
 export type OpenAiCoachConversationMessage = {
-  role: 'assistant' | 'user';
+  role: "assistant" | "user";
   text: string;
 };
 
@@ -22,26 +22,26 @@ type OpenAiResponseJson = {
   error?: unknown;
 };
 
-const responsesUrl = 'https://api.openai.com/v1/responses';
+const responsesUrl = "https://api.openai.com/v1/responses";
 
 // OpenAI's JS SDK does not currently support React Native, so this wrapper calls
 // the same Responses API directly from the Expo app.
 const coachInstructions = [
-  'You are BioStream, a practical health and fitness coach inside a private mobile app.',
-  'Use only the supplied local health summary and conversation. Do not pretend to see data that is absent.',
-  'The SQLite table inventory is authoritative for whether synced health data exists. If it says synced rows exist, never say no health data is synced.',
-  'The rendered app cards already show exact metrics and the workout details. Do not simply repeat those values; interpret what they mean for the athlete.',
-  'The supplied training plan is a deterministic scaffold with safety guardrails. Use it as the current plan, but discuss trade-offs, substitutions, and adaptations naturally.',
-  'If the user wants to change the plan, explain the safest adjustment and what should be confirmed before the app mutates the plan.',
-  'Give concise coaching guidance for today or the broader plan. Keep replies to 2-5 short sentences and ask at most one follow-up question.',
-  'Be conservative with pain, injury, illness, fever, chest pain, fainting, unusual shortness of breath, or severe fatigue. In those cases lower intensity and suggest professional care when symptoms are serious, sharp, worsening, chest-related, or unusual.',
-  'Do not diagnose, prescribe treatment, or make emergency claims. Separate what the data supports from what remains uncertain.',
-  'When data is stale or missing, say so plainly and use a safer recommendation.',
-  'Never compare HRV values across different methods or sources. RMSSD and SDNN require separate baselines.',
-].join('\n');
+  "You are BioStream, a practical health and fitness coach inside a private mobile app.",
+  "Use only the supplied local health summary and conversation. Do not pretend to see data that is absent.",
+  "The SQLite table inventory is authoritative for whether synced health data exists. If it says synced rows exist, never say no health data is synced.",
+  "The rendered app cards already show exact metrics and the workout details. Do not simply repeat those values; interpret what they mean for the athlete.",
+  "The supplied training plan is a deterministic scaffold with safety guardrails. Use it as the current plan, but discuss trade-offs, substitutions, and adaptations naturally.",
+  "If the user wants to change the plan, explain the safest adjustment and what should be confirmed before the app mutates the plan.",
+  "Give concise coaching guidance for today or the broader plan. Keep replies to 2-5 short sentences and ask at most one follow-up question.",
+  "Be conservative with pain, injury, illness, fever, chest pain, fainting, unusual shortness of breath, or severe fatigue. In those cases lower intensity and suggest professional care when symptoms are serious, sharp, worsening, chest-related, or unusual.",
+  "Do not diagnose, prescribe treatment, or make emergency claims. Separate what the data supports from what remains uncertain.",
+  "When data is stale or missing, say so plainly and use a safer recommendation.",
+  "Never compare HRV values across different methods or sources. RMSSD and SDNN require separate baselines.",
+].join("\n");
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function errorMessageFromJson(json: OpenAiResponseJson): string | null {
@@ -50,7 +50,7 @@ function errorMessageFromJson(json: OpenAiResponseJson): string | null {
   }
 
   const message = json.error.message;
-  return typeof message === 'string' ? message : null;
+  return typeof message === "string" ? message : null;
 }
 
 function extractTextFromOutput(output: unknown): string | null {
@@ -70,13 +70,13 @@ function extractTextFromOutput(output: unknown): string | null {
         continue;
       }
 
-      if (typeof content.text === 'string') {
+      if (typeof content.text === "string") {
         chunks.push(content.text);
       }
     }
   }
 
-  const text = chunks.join('\n').trim();
+  const text = chunks.join("\n").trim();
   return text || null;
 }
 
@@ -99,7 +99,10 @@ function hrvContext(day: DailyMetrics) {
   };
 }
 
-function buildPlanContext(goalText: string | undefined, plan: TrainingPlan | undefined) {
+function buildPlanContext(
+  goalText: string | undefined,
+  plan: TrainingPlan | undefined,
+) {
   if (!plan) {
     return {
       userGoal: goalText?.trim() || null,
@@ -182,6 +185,8 @@ function buildCoachContext(
           activityElapsedSeconds: snapshot.today.activityElapsedSeconds,
         }
       : null,
+    userReportedCheckIn: snapshot.todayCheckIn,
+    recentUserReportedCheckIns: snapshot.checkInHistory.slice(0, 7),
     recentDays: snapshot.history.slice(0, 7).map((day) => ({
       date: day.date,
       wellnessDataStatus: day.wellnessDataStatus,
@@ -194,7 +199,7 @@ function buildCoachContext(
     })),
     recentWorkouts: snapshot.recentWorkouts.slice(0, 5).map((workout) => ({
       date: safeDate(workout.startAt),
-      name: workout.name ?? workout.activityType ?? 'Workout',
+      name: workout.name ?? workout.activityType ?? "Workout",
       sport: workout.sportBucket,
       duration: formatDuration(workout.elapsedSeconds),
       distanceKm: workout.distanceKm,
@@ -240,7 +245,7 @@ function buildCoachContext(
       })),
       recentWorkouts: healthContext.recentWorkouts.map((workout) => ({
         date: workout.localDate,
-        name: workout.name ?? workout.activityType ?? 'Workout',
+        name: workout.name ?? workout.activityType ?? "Workout",
         sport: workout.sportBucket,
         duration: formatDuration(workout.elapsedSeconds),
         distanceKm: workout.distanceKm,
@@ -270,16 +275,22 @@ function buildCoachInput({
   const recentConversation = conversation.slice(-8);
 
   return [
-    'Local health summary:',
-    JSON.stringify(buildCoachContext(snapshot, healthContext, goalText, plan), null, 2),
-    '',
-    'Recent conversation:',
+    "Local health summary:",
+    JSON.stringify(
+      buildCoachContext(snapshot, healthContext, goalText, plan),
+      null,
+      2,
+    ),
+    "",
+    "Recent conversation:",
     recentConversation.length
-      ? recentConversation.map((turn) => `${turn.role}: ${turn.text}`).join('\n')
-      : 'No previous coach conversation in this session.',
-    '',
+      ? recentConversation
+          .map((turn) => `${turn.role}: ${turn.text}`)
+          .join("\n")
+      : "No previous coach conversation in this session.",
+    "",
     `Latest user message: ${userMessage}`,
-  ].join('\n');
+  ].join("\n");
 }
 
 export async function sendCoachMessage({
@@ -304,10 +315,17 @@ export async function sendCoachMessage({
   const payload: Record<string, unknown> = {
     model: openAiCoachModel,
     instructions: coachInstructions,
-    input: buildCoachInput({ conversation, goalText, healthContext, plan, snapshot, userMessage }),
+    input: buildCoachInput({
+      conversation,
+      goalText,
+      healthContext,
+      plan,
+      snapshot,
+      userMessage,
+    }),
     max_output_tokens: 1200,
-    reasoning: { effort: 'high' },
-    truncation: 'auto',
+    reasoning: { effort: "high" },
+    truncation: "auto",
   };
 
   if (previousResponseId) {
@@ -318,26 +336,29 @@ export async function sendCoachMessage({
     body: JSON.stringify(payload),
     headers: {
       Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
-    method: 'POST',
+    method: "POST",
   });
   const json = (await response.json()) as OpenAiResponseJson;
 
   if (!response.ok) {
-    throw new Error(errorMessageFromJson(json) ?? `OpenAI request failed with ${response.status}`);
+    throw new Error(
+      errorMessageFromJson(json) ??
+        `OpenAI request failed with ${response.status}`,
+    );
   }
 
   const text =
-    (typeof json.output_text === 'string' ? json.output_text.trim() : null) ??
+    (typeof json.output_text === "string" ? json.output_text.trim() : null) ??
     extractTextFromOutput(json.output);
 
   if (!text) {
-    throw new Error('OpenAI returned an empty coach response.');
+    throw new Error("OpenAI returned an empty coach response.");
   }
 
   return {
-    responseId: typeof json.id === 'string' ? json.id : null,
+    responseId: typeof json.id === "string" ? json.id : null,
     text,
   };
 }

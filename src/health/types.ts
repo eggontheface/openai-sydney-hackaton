@@ -312,6 +312,30 @@ export type CoachRecommendationActivity = {
   rationale: string;
 };
 
+export type DailyCheckInPain = "none" | "mild" | "moderate" | "severe";
+
+export type DailyCheckInPreferredActivity =
+  | "easy_cardio"
+  | "run"
+  | "ride"
+  | "strength"
+  | "mobility"
+  | "rest";
+
+export type DailyCheckIn = {
+  localDate: string;
+  sleepQuality: number;
+  soreness: number;
+  energy: number;
+  pain: DailyCheckInPain;
+  availableTimeMinutes: number;
+  preferredActivity: DailyCheckInPreferredActivity;
+  completedYesterday: boolean;
+  source: "user_reported";
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CoachRecommendation = {
   readiness: number | null;
   readinessStatus: ReadinessStatusContract;
@@ -351,6 +375,8 @@ export type PipelineSnapshot = {
   latestDiagnostics: HealthConnectReadDiagnostic[];
   today: DailyMetrics | null;
   history: DailyMetrics[];
+  todayCheckIn: DailyCheckIn | null;
+  checkInHistory: DailyCheckIn[];
   recentWorkouts: WorkoutRecord[];
   recentSamples: HealthSample[];
   trainingLoad: TrainingLoadSnapshot;

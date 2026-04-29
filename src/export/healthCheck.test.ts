@@ -87,6 +87,8 @@ function snapshot(overrides: Partial<PipelineSnapshot> = {}): PipelineSnapshot {
       generatedAt,
     },
     history: [],
+    todayCheckIn: null,
+    checkInHistory: [],
     recentWorkouts: [],
     recentSamples: [],
     trainingLoad: buildTrainingLoadSnapshot(),

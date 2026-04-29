@@ -39,7 +39,11 @@ import {
   currentHealthProviderLabel,
   syncCurrentPlatform,
 } from "./src/health/syncPipeline";
-import type { PipelineSnapshot, SyncRange } from "./src/health/types";
+import type {
+  DailyCheckIn,
+  PipelineSnapshot,
+  SyncRange,
+} from "./src/health/types";
 import { formatRange, makeSyncRange } from "./src/lib/dates";
 import {
   buildLocalGoalCoachReply,
@@ -68,6 +72,7 @@ import {
   getRecentSyncRuns,
   initTrainingStore,
   recordSyncRun,
+  saveDailyCheckIn,
   upsertSyncPayload,
 } from "./src/storage/trainingStore";
 import { styles } from "./src/styles/appStyles";
@@ -546,6 +551,21 @@ export default function App() {
     }
   }
 
+  async function updateDailyCheckIn(draft: Partial<DailyCheckIn>) {
+    try {
+      const saved = await saveDailyCheckIn(draft);
+      const freshSnapshot = await getPipelineSnapshot();
+      setSnapshot(freshSnapshot);
+      setStatus(
+        saved.pain === "none"
+          ? "Daily check-in saved"
+          : `Daily check-in saved with ${saved.pain} pain flagged`,
+      );
+    } catch (error) {
+      setStatus(String(error instanceof Error ? error.message : error));
+    }
+  }
+
   function confirmClear() {
     Alert.alert(
       "Clear local data",
@@ -616,6 +636,7 @@ export default function App() {
             onChangeCoachDraft={setCoachDraft}
             onSendCoachMessage={submitCoachMessage}
             onOpenWorkout={() => setActiveTab("workout")}
+            onSaveDailyCheckIn={updateDailyCheckIn}
             onSync={runSync}
             snapshot={snapshot}
             status={status}
