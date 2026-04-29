@@ -356,7 +356,7 @@ export function CoachOnboardingScreen({
 
         <CoachLine>{activeStep.question}</CoachLine>
         <DataCard
-          accent={tokens.ink}
+          accent={tokens.accent}
           inset
           label={activeStep.id === "data" ? "Datasource" : "Coach setup"}
         >
@@ -477,7 +477,7 @@ export function CoachOnboardingScreen({
             <TextInput
               accessibilityLabel="Message your coach"
               autoCorrect
-              cursorColor={tokens.ink}
+              cursorColor={tokens.accent}
               editable={!isSummaryStep}
               onChangeText={setComposerDraft}
               onSubmitEditing={() => {
@@ -492,7 +492,7 @@ export function CoachOnboardingScreen({
               }
               placeholderTextColor={tokens.muted}
               returnKeyType="send"
-              selectionColor={tokens.ink}
+              selectionColor={tokens.accent}
               style={styles.composerTextInput}
               value={composerDraft}
             />
