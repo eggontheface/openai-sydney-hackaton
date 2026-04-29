@@ -1,11 +1,16 @@
 import {
   completeStructuredCoachOutputFixture,
   unknownReadinessStructuredCoachOutputFixture,
-} from './fixtures/structuredCoach.fixtures';
+} from "./fixtures/structuredCoach.fixtures";
 import {
   parseStructuredCoachOutput,
   type StructuredCoachOutput,
-} from './schemas';
+} from "./schemas";
+import {
+  applyConservativeRiskOverride,
+  extractRiskFlagsFromCoachRequest,
+  type RiskFlagInput,
+} from "./riskFlags";
 
 export type StructuredCoachRequest = {
   generated_at: string;
@@ -13,6 +18,9 @@ export type StructuredCoachRequest = {
   goal_profile?: unknown;
   event_profile?: unknown;
   health_context?: unknown;
+  daily_check_in?: unknown;
+  typed_adjustment?: unknown;
+  risk_flag_inputs?: readonly RiskFlagInput[];
 };
 
 export type StructuredCoachService = {
@@ -31,8 +39,10 @@ export function createMockStructuredCoachService(
   const output = options.output ?? completeStructuredCoachOutputFixture;
 
   return {
-    async generateDailyRecommendation(_request) {
-      return parseStructuredCoachOutput(output);
+    async generateDailyRecommendation(request) {
+      const parsedOutput = parseStructuredCoachOutput(output);
+      const riskFlags = extractRiskFlagsFromCoachRequest(request);
+      return applyConservativeRiskOverride(parsedOutput, riskFlags);
     },
   };
 }
