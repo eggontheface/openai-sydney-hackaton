@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -16,7 +16,6 @@ import {
   RefreshCw,
 } from "lucide-react-native";
 
-import { generateTrainingPlan, resolveTrainingGoal } from "../coach/planEngine";
 import {
   dataAge,
   formatDateKey,
@@ -89,10 +88,6 @@ export function CoachScreen({
   const recommendation = snapshot.recommendation;
   const readinessStatus = recommendation.readinessStatus;
   const accent = toneColor(recommendation.color);
-  const plan = useMemo(
-    () => generateTrainingPlan(snapshot, resolveTrainingGoal(goalText)),
-    [goalText, snapshot],
-  );
   const sleep = current?.sleepSeconds
     ? formatDurationFromDates(current.sleepSeconds)
     : "—";
@@ -282,19 +277,41 @@ export function CoachScreen({
                 <Activity color={tokens.surface} size={18} strokeWidth={2} />
               </View>
               <View style={styles.planCopy}>
-                <Text style={styles.planTitle}>{plan.today.title}</Text>
+                <Text style={styles.planTitle}>
+                  {recommendation.recommendedActivity.title}
+                </Text>
                 <View style={styles.coachPlanStats}>
                   <Text style={styles.coachPlanStat}>
-                    {plan.today.durationMinutes}:00
+                    {recommendation.recommendedActivity.durationOrVolume}
                   </Text>
-                  <Text style={styles.coachPlanStat}>~7.2 km</Text>
                   <Text style={styles.coachPlanStat}>
-                    {plan.today.intensity}
+                    {recommendation.recommendedActivity.intensityTarget}
+                  </Text>
+                  <Text style={styles.coachPlanStat}>
+                    {Math.round(recommendation.confidence * 100)}% confidence
                   </Text>
                 </View>
                 <Text style={styles.planDetail}>
-                  Your {wearableLabel} will capture distance, pace, heart rate,
-                  route, splits, and duration.
+                  {recommendation.shortExplanation}
+                </Text>
+                <Text style={styles.planDetail}>
+                  Easier: {recommendation.easierAlternative.title} ·{" "}
+                  {recommendation.easierAlternative.durationOrVolume}.
+                </Text>
+                <Text style={styles.planDetail}>
+                  Avoid: {recommendation.whatToAvoidToday.join(", ")}.
+                </Text>
+                <Text style={styles.planDetail}>
+                  Sources:{" "}
+                  {recommendation.sourcesUsed.length
+                    ? recommendation.sourcesUsed.join(", ")
+                    : "no usable readiness sources"}
+                  {recommendation.sourcesIgnored.length
+                    ? ` · Ignored: ${recommendation.sourcesIgnored.join(", ")}`
+                    : ""}
+                </Text>
+                <Text style={styles.planDetail}>
+                  Check-in: {recommendation.checkInQuestion}
                 </Text>
               </View>
               <ArrowRight color={tokens.muted} size={17} strokeWidth={2} />

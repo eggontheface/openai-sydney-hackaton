@@ -2,6 +2,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import * as SQLite from "expo-sqlite";
 
+import { completeCoachRecommendation } from "../coach/dailyRecommendation";
 import { extractRiskFlagsFromCoachRequest } from "../coach/riskFlags";
 import { buildReadinessStatus } from "../coach/readinessStatus";
 import {
@@ -2579,7 +2580,7 @@ function deriveRecommendation(
       sourceFreshness,
     });
 
-    return {
+    return completeCoachRecommendation({
       readiness: null,
       readinessStatus,
       readinessLabel: readinessStatus.ui.label,
@@ -2590,7 +2591,7 @@ function deriveRecommendation(
       opener: readinessStatus.ui.opener,
       strain: 0,
       strainTarget: "—",
-    };
+    });
   }
 
   const baselineRows = history
@@ -2716,62 +2717,74 @@ function deriveRecommendation(
       : [readinessStatus.ui.reason];
 
   if (readinessStatus.status === "unknown") {
-    return {
-      readiness: readinessStatus.score,
-      readinessStatus,
-      readinessLabel: readinessStatus.ui.label,
-      color: readinessStatus.ui.color,
-      title: "Easy walk + mobility",
-      detail: "20-30 min easy movement · optional mobility",
-      reason: `${coachSignals.join(", ")}. Readiness is unknown, so today's call stays conservative.`,
-      opener: `Readiness is unknown. ${coachSignals.join(", ")}. I would keep this easy until the recovery picture is clearer.`,
-      strain: 4,
-      strainTarget: "3-5",
-    };
+    return completeCoachRecommendation(
+      {
+        readiness: readinessStatus.score,
+        readinessStatus,
+        readinessLabel: readinessStatus.ui.label,
+        color: readinessStatus.ui.color,
+        title: "Easy walk + mobility",
+        detail: "20-30 min easy movement · optional mobility",
+        reason: `${coachSignals.join(", ")}. Readiness is unknown, so today's call stays conservative.`,
+        opener: `Readiness is unknown. ${coachSignals.join(", ")}. I would keep this easy until the recovery picture is clearer.`,
+        strain: 4,
+        strainTarget: "3-5",
+      },
+      { readinessSignals, contextSignals },
+    );
   }
 
   if (readinessStatus.status === "red") {
-    return {
-      readiness: readinessStatus.score,
-      readinessStatus,
-      readinessLabel: readinessStatus.ui.label,
-      color: readinessStatus.ui.color,
-      title: "Easy walk + mobility",
-      detail: "30 min Z1 walk · 10 min hips and calves",
-      reason: `${coachSignals.join(", ")}. Pushing hard today would reduce the odds of stacking the next session well.`,
-      opener: `Honest check-in: ${coachSignals.join(", ")}. I would keep this soft and earn tomorrow.`,
-      strain: 5.5,
-      strainTarget: "4-7",
-    };
+    return completeCoachRecommendation(
+      {
+        readiness: readinessStatus.score,
+        readinessStatus,
+        readinessLabel: readinessStatus.ui.label,
+        color: readinessStatus.ui.color,
+        title: "Easy walk + mobility",
+        detail: "30 min Z1 walk · 10 min hips and calves",
+        reason: `${coachSignals.join(", ")}. Pushing hard today would reduce the odds of stacking the next session well.`,
+        opener: `Honest check-in: ${coachSignals.join(", ")}. I would keep this soft and earn tomorrow.`,
+        strain: 5.5,
+        strainTarget: "4-7",
+      },
+      { readinessSignals, contextSignals },
+    );
   }
 
   if (readinessStatus.status === "green" && (current.workoutCount ?? 0) === 0) {
-    return {
+    return completeCoachRecommendation(
+      {
+        readiness: readinessStatus.score,
+        readinessStatus,
+        readinessLabel: readinessStatus.ui.label,
+        color: readinessStatus.ui.color,
+        title: "Quality run",
+        detail: "10 min easy · 4 x 5 min strong · cool down",
+        reason: `${coachSignals.join(", ")}. Current recovery supports a harder aerobic stimulus.`,
+        opener: `You're primed. ${coachSignals.join(", ")}. If you were waiting for a green light, this is it.`,
+        strain: 13.5,
+        strainTarget: "12-15",
+      },
+      { readinessSignals, contextSignals },
+    );
+  }
+
+  return completeCoachRecommendation(
+    {
       readiness: readinessStatus.score,
       readinessStatus,
       readinessLabel: readinessStatus.ui.label,
       color: readinessStatus.ui.color,
-      title: "Quality run",
-      detail: "10 min easy · 4 x 5 min strong · cool down",
-      reason: `${coachSignals.join(", ")}. Current recovery supports a harder aerobic stimulus.`,
-      opener: `You're primed. ${coachSignals.join(", ")}. If you were waiting for a green light, this is it.`,
-      strain: 13.5,
-      strainTarget: "12-15",
-    };
-  }
-
-  return {
-    readiness: readinessStatus.score,
-    readinessStatus,
-    readinessLabel: readinessStatus.ui.label,
-    color: readinessStatus.ui.color,
-    title: "Aerobic base",
-    detail: "45 min easy run or ride · stay conversational",
-    reason: `${coachSignals.join(", ")}. This is a good day to add durable aerobic volume without forcing intensity.`,
-    opener: `Solid baseline today. ${coachSignals.join(", ")}. Stack the work and keep it controlled.`,
-    strain: 9.5,
-    strainTarget: "8-11",
-  };
+      title: "Aerobic base",
+      detail: "45 min easy run or ride · stay conversational",
+      reason: `${coachSignals.join(", ")}. This is a good day to add durable aerobic volume without forcing intensity.`,
+      opener: `Solid baseline today. ${coachSignals.join(", ")}. Stack the work and keep it controlled.`,
+      strain: 9.5,
+      strainTarget: "8-11",
+    },
+    { readinessSignals, contextSignals },
+  );
 }
 
 export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {

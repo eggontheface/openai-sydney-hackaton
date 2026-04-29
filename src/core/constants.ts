@@ -8,6 +8,7 @@ import {
   Zap,
 } from "lucide-react-native";
 
+import { completeCoachRecommendation } from "../coach/dailyRecommendation";
 import { buildReadinessStatus } from "../coach/readinessStatus";
 import { buildTrainingLoadSnapshot } from "../coach/trainingLoad";
 import type { PipelineSnapshot } from "../health/types";
@@ -38,7 +39,7 @@ export const emptySnapshot: PipelineSnapshot = {
   recentWorkouts: [],
   recentSamples: [],
   trainingLoad: buildTrainingLoadSnapshot(),
-  recommendation: {
+  recommendation: completeCoachRecommendation({
     readiness: null,
     readinessStatus: buildReadinessStatus({
       score: null,
@@ -53,7 +54,7 @@ export const emptySnapshot: PipelineSnapshot = {
     opener: "Readiness is unknown, so I would keep today conservative.",
     strain: 0,
     strainTarget: "—",
-  },
+  }),
 };
 
 export const analyticsMetrics: AnalyticsMetricConfig[] = [

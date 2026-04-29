@@ -1,5 +1,6 @@
 import type { PipelineSnapshot } from "../health/types";
 
+import { completeCoachRecommendation } from "../coach/dailyRecommendation";
 import { buildReadinessStatus } from "../coach/readinessStatus";
 import { buildTrainingLoadSnapshot } from "../coach/trainingLoad";
 import { buildPipelineExportArtifacts } from "./pipelineExport";
@@ -19,7 +20,7 @@ function snapshot(): PipelineSnapshot {
     recentWorkouts: [],
     recentSamples: [],
     trainingLoad: buildTrainingLoadSnapshot(),
-    recommendation: {
+    recommendation: completeCoachRecommendation({
       readiness: null,
       readinessStatus: buildReadinessStatus({
         score: null,
@@ -35,7 +36,7 @@ function snapshot(): PipelineSnapshot {
       opener: "Readiness is unknown, so I would keep today conservative.",
       strain: 0,
       strainTarget: "0",
-    },
+    }),
   };
 }
 

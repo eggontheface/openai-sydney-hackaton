@@ -1,5 +1,6 @@
 import type { PipelineSnapshot, SourceFreshness } from "../health/types";
 
+import { completeCoachRecommendation } from "../coach/dailyRecommendation";
 import { buildReadinessStatus } from "../coach/readinessStatus";
 import { buildTrainingLoadSnapshot } from "../coach/trainingLoad";
 import { generateHealthCheckMarkdown } from "./healthCheck";
@@ -89,7 +90,7 @@ function snapshot(overrides: Partial<PipelineSnapshot> = {}): PipelineSnapshot {
     recentWorkouts: [],
     recentSamples: [],
     trainingLoad: buildTrainingLoadSnapshot(),
-    recommendation: {
+    recommendation: completeCoachRecommendation({
       readiness: 62,
       readinessStatus: buildReadinessStatus({
         score: 62,
@@ -104,7 +105,7 @@ function snapshot(overrides: Partial<PipelineSnapshot> = {}): PipelineSnapshot {
       opener: "Use the current data conservatively.",
       strain: 5,
       strainTarget: "4-6",
-    },
+    }),
     ...overrides,
   };
 }
@@ -169,7 +170,7 @@ describe("generateHealthCheckMarkdown", () => {
         coverageDays: 0,
         sourceFreshness: [],
         today: null,
-        recommendation: {
+        recommendation: completeCoachRecommendation({
           readiness: null,
           readinessStatus: buildReadinessStatus({
             score: null,
@@ -185,7 +186,7 @@ describe("generateHealthCheckMarkdown", () => {
           opener: "Readiness is unknown, so I would keep today conservative.",
           strain: 0,
           strainTarget: "0",
-        },
+        }),
       }),
       { generatedAt },
     );

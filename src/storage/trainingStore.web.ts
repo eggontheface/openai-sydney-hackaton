@@ -10,6 +10,7 @@ import type {
   SyncRange,
 } from "../health/types";
 import { emptySnapshot } from "../core/constants";
+import { completeCoachRecommendation } from "../coach/dailyRecommendation";
 import { buildReadinessStatus } from "../coach/readinessStatus";
 import { buildTrainingLoadSnapshot } from "../coach/trainingLoad";
 import { buildPipelineExportArtifacts } from "../export/pipelineExport";
@@ -423,7 +424,7 @@ const demoSnapshot: PipelineSnapshot = {
   ],
   recentSamples: [],
   trainingLoad: buildTrainingLoadSnapshot(),
-  recommendation: {
+  recommendation: completeCoachRecommendation({
     readiness: 78,
     readinessStatus: demoReadinessStatus,
     readinessLabel: demoReadinessStatus.ui.label,
@@ -436,7 +437,7 @@ const demoSnapshot: PipelineSnapshot = {
       "Morning. Your wearable data already shows a strong recovery profile today.",
     strain: 9.5,
     strainTarget: "8-11",
-  },
+  }),
 };
 
 let lastSync: SyncRunRow | null = {

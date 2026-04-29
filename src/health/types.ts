@@ -305,6 +305,13 @@ export type TrainingLoadSnapshot = {
 
 export type CoachTone = "positive" | "warm" | "cool" | "neutral";
 
+export type CoachRecommendationActivity = {
+  title: string;
+  intensityTarget: string;
+  durationOrVolume: string;
+  rationale: string;
+};
+
 export type CoachRecommendation = {
   readiness: number | null;
   readinessStatus: ReadinessStatusContract;
@@ -316,6 +323,14 @@ export type CoachRecommendation = {
   opener: string;
   strain: number;
   strainTarget: string;
+  shortExplanation: string;
+  recommendedActivity: CoachRecommendationActivity;
+  easierAlternative: CoachRecommendationActivity;
+  whatToAvoidToday: string[];
+  confidence: number;
+  sourcesUsed: string[];
+  sourcesIgnored: string[];
+  checkInQuestion: string;
 };
 
 export type MetricAvailability = {
