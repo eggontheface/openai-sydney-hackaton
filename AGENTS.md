@@ -20,7 +20,14 @@ You are collaborating with multiple developers and need to move fast. Favor smal
 - Read just enough surrounding code and docs to avoid breaking the app.
 - Prefer existing app patterns over new abstractions.
 - Keep commits focused, but do not over-polish.
+- The default preview path should stay regular Expo:
+  `npm start -- -c`
+- Use web preview for fast UI checks:
+  `npm run web -- -c`
+- Use the dev-client path only when testing native Health Connect / HealthKit behavior:
+  `npm run start:dev-client -- -c`
 - For Health Connect or native permission changes, remember that Android needs a rebuild/reinstall, not just a JS reload.
+- If native modules, config plugins, Android permissions, or iOS entitlements change, rebuild with `npx expo run:android` or the matching platform command before expecting device behavior to update.
 - Keep local-only secrets out of git. API keys must use secure device storage or environment variables.
 - Preserve raw health data in the pipeline; dedupe or aggregate in derived views/tables unless explicitly changing storage semantics.
 - When adding pipeline fields, update types, SQLite persistence, exports, UI consumers, and diagnostics together.
