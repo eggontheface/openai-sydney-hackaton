@@ -1,0 +1,52 @@
+{
+  "id": "stale-data",
+  "name": "Stale recovery data",
+  "asOfDate": "2026-04-29",
+  "generatedAt": "2026-04-29T12:00:00.000Z",
+  "readinessScore": 68,
+  "readinessSignals": [
+    "sleep was adequate at 6h 50m",
+    "Sleep is stale",
+    "HRV is missing"
+  ],
+  "sourceFreshness": [
+    {
+      "domain": "sleep",
+      "label": "Sleep",
+      "state": "stale",
+      "canonicalTypes": ["sleep_session"],
+      "latestLocalDate": "2026-04-26",
+      "ageDays": 3
+    },
+    {
+      "domain": "hrv",
+      "label": "HRV",
+      "state": "missing",
+      "canonicalTypes": ["hrv_rmssd"]
+    },
+    {
+      "domain": "resting_hr",
+      "label": "Resting HR",
+      "state": "fresh",
+      "canonicalTypes": ["resting_heart_rate"],
+      "latestLocalDate": "2026-04-29",
+      "ageDays": 0
+    }
+  ],
+  "checkIns": [
+    {
+      "source": "daily_check_in",
+      "text": "I feel normal but the watch did not sync overnight."
+    }
+  ],
+  "workouts": [
+    { "daysAgo": 2, "sportBucket": "run", "elapsedMinutes": 42 },
+    { "daysAgo": 8, "sportBucket": "strength", "elapsedMinutes": 45 },
+    { "daysAgo": 15, "sportBucket": "run", "elapsedMinutes": 38 }
+  ],
+  "recommendation": {
+    "title": "Controlled aerobic work",
+    "detail": "25-35 min conversational effort",
+    "reason": "Usable but stale recovery data keeps intensity controlled."
+  }
+}

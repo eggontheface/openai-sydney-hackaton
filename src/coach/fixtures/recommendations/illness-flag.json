@@ -1,0 +1,42 @@
+{
+  "id": "illness-flag",
+  "name": "Illness flag",
+  "asOfDate": "2026-04-29",
+  "generatedAt": "2026-04-29T12:00:00.000Z",
+  "readinessScore": 79,
+  "readinessSignals": ["sleep was 7h 30m", "HRV is near baseline"],
+  "sourceFreshness": [
+    {
+      "domain": "sleep",
+      "label": "Sleep",
+      "state": "fresh",
+      "canonicalTypes": ["sleep_session"],
+      "latestLocalDate": "2026-04-29",
+      "ageDays": 0
+    },
+    {
+      "domain": "hrv",
+      "label": "HRV",
+      "state": "fresh",
+      "canonicalTypes": ["hrv_rmssd"],
+      "latestLocalDate": "2026-04-29",
+      "ageDays": 0
+    }
+  ],
+  "checkIns": [
+    {
+      "source": "daily_check_in",
+      "text": "I am feverish and still sick today."
+    }
+  ],
+  "workouts": [
+    { "daysAgo": 2, "sportBucket": "ride", "elapsedMinutes": 75 },
+    { "daysAgo": 6, "sportBucket": "run", "elapsedMinutes": 50 },
+    { "daysAgo": 11, "sportBucket": "strength", "elapsedMinutes": 45 }
+  ],
+  "recommendation": {
+    "title": "Illness recovery",
+    "detail": "Rest, hydrate, and monitor symptoms",
+    "reason": "Illness flags block intensity regardless of wearable readiness."
+  }
+}

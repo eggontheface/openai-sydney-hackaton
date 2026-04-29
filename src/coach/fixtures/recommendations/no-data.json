@@ -1,0 +1,41 @@
+{
+  "id": "no-data",
+  "name": "No health data",
+  "asOfDate": "2026-04-29",
+  "generatedAt": "2026-04-29T12:00:00.000Z",
+  "readinessScore": null,
+  "readinessSignals": [],
+  "sourceFreshness": [
+    {
+      "domain": "sleep",
+      "label": "Sleep",
+      "state": "missing",
+      "canonicalTypes": ["sleep_session"]
+    },
+    {
+      "domain": "hrv",
+      "label": "HRV",
+      "state": "missing",
+      "canonicalTypes": ["hrv_rmssd"]
+    },
+    {
+      "domain": "resting_hr",
+      "label": "Resting HR",
+      "state": "missing",
+      "canonicalTypes": ["resting_heart_rate"]
+    },
+    {
+      "domain": "steps",
+      "label": "Steps",
+      "state": "missing",
+      "canonicalTypes": ["steps"]
+    }
+  ],
+  "checkIns": [],
+  "workouts": [],
+  "recommendation": {
+    "title": "Baseline walk",
+    "detail": "15-25 min easy walk or mobility",
+    "reason": "Readiness is unknown because no current recovery data is available."
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "id": "high-readiness",
+  "name": "High readiness",
+  "asOfDate": "2026-04-29",
+  "generatedAt": "2026-04-29T12:00:00.000Z",
+  "readinessScore": 86,
+  "readinessSignals": [
+    "sleep was 8h 10m",
+    "RMSSD HRV is up 14 ms",
+    "resting HR is down 4 bpm"
+  ],
+  "sourceFreshness": [
+    {
+      "domain": "sleep",
+      "label": "Sleep",
+      "state": "fresh",
+      "canonicalTypes": ["sleep_session"],
+      "latestLocalDate": "2026-04-29",
+      "ageDays": 0
+    },
+    {
+      "domain": "hrv",
+      "label": "HRV",
+      "state": "fresh",
+      "canonicalTypes": ["hrv_rmssd"],
+      "latestLocalDate": "2026-04-29",
+      "ageDays": 0
+    },
+    {
+      "domain": "resting_hr",
+      "label": "Resting HR",
+      "state": "fresh",
+      "canonicalTypes": ["resting_heart_rate"],
+      "latestLocalDate": "2026-04-29",
+      "ageDays": 0
+    }
+  ],
+  "checkIns": [
+    {
+      "source": "daily_check_in",
+      "text": "No pain today, slept well, ready to train."
+    }
+  ],
+  "workouts": [
+    { "daysAgo": 1, "sportBucket": "run", "elapsedMinutes": 75 },
+    { "daysAgo": 4, "sportBucket": "run", "elapsedMinutes": 80 },
+    { "daysAgo": 7, "sportBucket": "run", "elapsedMinutes": 90 },
+    { "daysAgo": 10, "sportBucket": "strength", "elapsedMinutes": 70 },
+    { "daysAgo": 14, "sportBucket": "run", "elapsedMinutes": 85 },
+    { "daysAgo": 18, "sportBucket": "run", "elapsedMinutes": 95 }
+  ],
+  "recommendation": {
+    "title": "Quality aerobic session",
+    "detail": "10 min easy, 4 x 5 min strong, cool down",
+    "reason": "Fresh recovery signals support the planned quality session."
+  }
+}
