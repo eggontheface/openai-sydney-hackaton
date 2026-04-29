@@ -1,32 +1,57 @@
-import { StatusBar } from 'expo-status-bar';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Keyboard, KeyboardAvoidingView, Platform, SafeAreaView } from 'react-native';
+import { StatusBar } from "expo-status-bar";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Alert,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+} from "react-native";
 
-import { openAiCoachModel, sendCoachMessage } from './src/ai/openaiCoach';
-import { generateTrainingPlan, resolveTrainingGoal } from './src/coach/planEngine';
-import { createCoachMessage, toOpenAiConversation } from './src/core/coachConversation';
-import { baselineRangeDays, emptyAppSettings, emptySnapshot } from './src/core/constants';
-import type { CoachConversationMessage, LastSync, SyncRuns, Tab } from './src/core/types';
-import { CoachOnboardingScreen } from './src/screens/CoachOnboardingScreen';
-import { CoachScreen } from './src/screens/CoachScreen';
-import { HistoryScreen } from './src/screens/HistoryScreen';
-import { SourceScreen } from './src/screens/SourceScreen';
-import { SplashScreen, StartLoadingScreen } from './src/screens/SplashScreen';
-import { WorkoutPlanScreen } from './src/screens/WorkoutPlanScreen';
-import { currentHealthProviderId, currentHealthProviderLabel, syncCurrentPlatform } from './src/health/syncPipeline';
-import type { PipelineSnapshot, SyncRange } from './src/health/types';
-import { formatRange, makeSyncRange } from './src/lib/dates';
+import { openAiCoachModel, sendCoachMessage } from "./src/ai/openaiCoach";
+import {
+  generateTrainingPlan,
+  resolveTrainingGoal,
+} from "./src/coach/planEngine";
+import {
+  createCoachMessage,
+  toOpenAiConversation,
+} from "./src/core/coachConversation";
+import {
+  baselineRangeDays,
+  emptyAppSettings,
+  emptySnapshot,
+} from "./src/core/constants";
+import type {
+  CoachConversationMessage,
+  LastSync,
+  SyncRuns,
+  Tab,
+} from "./src/core/types";
+import { CoachOnboardingScreen } from "./src/screens/CoachOnboardingScreen";
+import { CoachScreen } from "./src/screens/CoachScreen";
+import { HistoryScreen } from "./src/screens/HistoryScreen";
+import { SourceScreen } from "./src/screens/SourceScreen";
+import { SplashScreen, StartLoadingScreen } from "./src/screens/SplashScreen";
+import { WorkoutPlanScreen } from "./src/screens/WorkoutPlanScreen";
+import {
+  currentHealthProviderId,
+  currentHealthProviderLabel,
+  syncCurrentPlatform,
+} from "./src/health/syncPipeline";
+import type { PipelineSnapshot, SyncRange } from "./src/health/types";
+import { formatRange, makeSyncRange } from "./src/lib/dates";
 import {
   clearOpenAiApiKey,
   loadAppSettings,
   readOpenAiApiKey,
   saveAppSettings,
   saveOpenAiApiKey,
-} from './src/storage/appSettings';
-import type { AppSettings } from './src/storage/appSettings';
+} from "./src/storage/appSettings";
+import type { AppSettings } from "./src/storage/appSettings";
 import {
   clearPipeline,
-  exportPipelineJson,
+  exportPipelineArtifacts,
   getCoachHealthContext,
   getLastSyncRun,
   getLastSuccessfulSyncRun,
@@ -35,39 +60,50 @@ import {
   initTrainingStore,
   recordSyncRun,
   upsertSyncPayload,
-} from './src/storage/trainingStore';
-import { styles } from './src/styles/appStyles';
-import { TabBar } from './src/ui/TabBar';
+} from "./src/storage/trainingStore";
+import { styles } from "./src/styles/appStyles";
+import { TabBar } from "./src/ui/TabBar";
 
 export default function App() {
-  const [entryMode, setEntryMode] = useState<'splash' | 'onboarding' | 'loading-start' | 'app'>('splash');
-  const [activeTab, setActiveTab] = useState<Tab>('coach');
+  const [entryMode, setEntryMode] = useState<
+    "splash" | "onboarding" | "loading-start" | "app"
+  >("splash");
+  const [activeTab, setActiveTab] = useState<Tab>("coach");
   const [rangeDays, setRangeDays] = useState(baselineRangeDays);
   const [snapshot, setSnapshot] = useState<PipelineSnapshot>(emptySnapshot);
-  const [goalText, setGoalText] = useState('');
+  const [goalText, setGoalText] = useState("");
   const [lastSync, setLastSync] = useState<LastSync>(null);
   const [lastSuccessfulSync, setLastSuccessfulSync] = useState<LastSync>(null);
   const [recentSyncRuns, setRecentSyncRuns] = useState<SyncRuns>([]);
   const [appSettings, setAppSettings] = useState<AppSettings>(emptyAppSettings);
-  const [apiKeyDraft, setApiKeyDraft] = useState('');
-  const [coachDraft, setCoachDraft] = useState('');
-  const [coachMessages, setCoachMessages] = useState<CoachConversationMessage[]>([]);
+  const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const [coachDraft, setCoachDraft] = useState("");
+  const [coachMessages, setCoachMessages] = useState<
+    CoachConversationMessage[]
+  >([]);
   const [coachBusy, setCoachBusy] = useState(false);
   const [coachResponseId, setCoachResponseId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
-  const [status, setStatus] = useState('Ready');
+  const [status, setStatus] = useState("Ready");
   const [warnings, setWarnings] = useState<string[]>([]);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [storeReady, setStoreReady] = useState(false);
   const bootstrapPromiseRef = useRef<Promise<void> | null>(null);
 
   const range = useMemo(() => makeSyncRange(rangeDays), [rangeDays]);
-  const canSync = Platform.OS === 'ios' || Platform.OS === 'android';
-  const sourceLabel = canSync ? currentHealthProviderLabel() : 'Apple Health / Health Connect';
+  const canSync = Platform.OS === "ios" || Platform.OS === "android";
+  const sourceLabel = canSync
+    ? currentHealthProviderLabel()
+    : "Apple Health / Health Connect";
 
   async function refreshStore() {
-    const [nextSnapshot, nextLastSync, nextLastSuccessfulSync, nextRecentSyncRuns] = await Promise.all([
+    const [
+      nextSnapshot,
+      nextLastSync,
+      nextLastSuccessfulSync,
+      nextRecentSyncRuns,
+    ] = await Promise.all([
       getPipelineSnapshot(),
       getLastSyncRun(),
       getLastSuccessfulSyncRun(),
@@ -87,7 +123,9 @@ export default function App() {
         setRangeDays(nextSettings.defaultSyncRangeDays);
         await refreshStore();
       })
-      .catch((error) => setStatus(String(error instanceof Error ? error.message : error)))
+      .catch((error) =>
+        setStatus(String(error instanceof Error ? error.message : error)),
+      )
       .finally(() => setStoreReady(true));
 
     bootstrapPromiseRef.current = bootstrap;
@@ -101,8 +139,12 @@ export default function App() {
   }
 
   useEffect(() => {
-    const showSubscription = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
-    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
+    const showSubscription = Keyboard.addListener("keyboardDidShow", () =>
+      setKeyboardVisible(true),
+    );
+    const hideSubscription = Keyboard.addListener("keyboardDidHide", () =>
+      setKeyboardVisible(false),
+    );
 
     return () => {
       showSubscription.remove();
@@ -115,8 +157,8 @@ export default function App() {
     try {
       const nextSettings = await saveOpenAiApiKey(apiKeyDraft);
       setAppSettings(nextSettings);
-      setApiKeyDraft('');
-      setStatus('OpenAI API key saved locally');
+      setApiKeyDraft("");
+      setStatus("OpenAI API key saved locally");
     } catch (error) {
       setStatus(String(error instanceof Error ? error.message : error));
     } finally {
@@ -129,8 +171,8 @@ export default function App() {
     try {
       const nextSettings = await clearOpenAiApiKey();
       setAppSettings(nextSettings);
-      setApiKeyDraft('');
-      setStatus('OpenAI API key cleared');
+      setApiKeyDraft("");
+      setStatus("OpenAI API key cleared");
     } catch (error) {
       setStatus(String(error instanceof Error ? error.message : error));
     } finally {
@@ -141,10 +183,14 @@ export default function App() {
   async function setDefaultSyncRange(days: number) {
     setSettingsBusy(true);
     try {
-      const nextSettings = await saveAppSettings({ defaultSyncRangeDays: days });
+      const nextSettings = await saveAppSettings({
+        defaultSyncRangeDays: days,
+      });
       setAppSettings(nextSettings);
       setRangeDays(nextSettings.defaultSyncRangeDays);
-      setStatus(`Default sync range set to ${nextSettings.defaultSyncRangeDays}d`);
+      setStatus(
+        `Default sync range set to ${nextSettings.defaultSyncRangeDays}d`,
+      );
     } catch (error) {
       setStatus(String(error instanceof Error ? error.message : error));
     } finally {
@@ -159,22 +205,24 @@ export default function App() {
     }
 
     if (busy) {
-      setStatus('Wait for the current sync to finish before messaging the coach.');
+      setStatus(
+        "Wait for the current sync to finish before messaging the coach.",
+      );
       return;
     }
 
-    const userMessage = createCoachMessage('user', text);
+    const userMessage = createCoachMessage("user", text);
     const requestConversation = toOpenAiConversation(coachMessages);
 
-    setCoachDraft('');
+    setCoachDraft("");
 
     const apiKey = await readOpenAiApiKey();
     if (!apiKey) {
-      setStatus('Save an OpenAI API key in You before messaging the coach.');
+      setStatus("Save an OpenAI API key in You before messaging the coach.");
       setCoachMessages((messages) => [
         ...messages,
         userMessage,
-        createCoachMessage('coach', localCoachFallback(text)),
+        createCoachMessage("coach", localCoachFallback(text)),
       ]);
       return;
     }
@@ -185,8 +233,13 @@ export default function App() {
 
     try {
       const freshSnapshot = await getPipelineSnapshot();
-      const healthContext = await getCoachHealthContext({ rebuildDaily: false });
-      const plan = generateTrainingPlan(freshSnapshot, resolveTrainingGoal(goalText));
+      const healthContext = await getCoachHealthContext({
+        rebuildDaily: false,
+      });
+      const plan = generateTrainingPlan(
+        freshSnapshot,
+        resolveTrainingGoal(goalText),
+      );
       setSnapshot(freshSnapshot);
       const response = await sendCoachMessage({
         apiKey,
@@ -199,16 +252,21 @@ export default function App() {
         userMessage: text,
       });
       setCoachResponseId(response.responseId);
-      setCoachMessages((messages) => [...messages, createCoachMessage('coach', response.text)]);
+      setCoachMessages((messages) => [
+        ...messages,
+        createCoachMessage("coach", response.text),
+      ]);
       setStatus(`Coach answered with ${openAiCoachModel}`);
     } catch (error) {
       const message = String(error instanceof Error ? error.message : error);
-      const isLocalDatabaseError = message.toLowerCase().includes('database is locked');
+      const isLocalDatabaseError = message
+        .toLowerCase()
+        .includes("database is locked");
       setStatus(message);
       setCoachMessages((messages) => [
         ...messages,
         createCoachMessage(
-          'coach',
+          "coach",
           isLocalDatabaseError
             ? `I couldn't read the local health database. Wait for sync to finish, then try again. ${message}`
             : `I couldn't reach the OpenAI API. ${message}`,
@@ -222,30 +280,32 @@ export default function App() {
   function localCoachFallback(message: string): string {
     const normalized = message.toLowerCase();
     const mentionsPain =
-      normalized.includes('pain') ||
-      normalized.includes('sore') ||
-      normalized.includes('knee') ||
-      normalized.includes('niggle') ||
-      normalized.includes('injur');
+      normalized.includes("pain") ||
+      normalized.includes("sore") ||
+      normalized.includes("knee") ||
+      normalized.includes("niggle") ||
+      normalized.includes("injur");
     const mentionsFatigue =
-      normalized.includes('tired') ||
-      normalized.includes('fatigue') ||
-      normalized.includes('exhausted') ||
-      normalized.includes('sick') ||
-      normalized.includes('ill');
+      normalized.includes("tired") ||
+      normalized.includes("fatigue") ||
+      normalized.includes("exhausted") ||
+      normalized.includes("sick") ||
+      normalized.includes("ill");
 
     if (mentionsPain) {
-      return 'Yes. Put the knee first today: swap impact work for an easy walk, bike, or mobility session, and keep discomfort at a very low level. Stop if it is sharp, worsening, swollen, or changes your gait; if it persists, skip running and get it checked. Save an OpenAI API key in You when you want me to talk through the full plan trade-off properly.';
+      return "Yes. Put the knee first today: swap impact work for an easy walk, bike, or mobility session, and keep discomfort at a very low level. Stop if it is sharp, worsening, swollen, or changes your gait; if it persists, skip running and get it checked. Save an OpenAI API key in You when you want me to talk through the full plan trade-off properly.";
     }
 
     if (mentionsFatigue) {
-      return 'Yes. Treat that as useful context and downshift today: reduce duration, keep intensity easy, or move the session to tomorrow. The plan should adapt to how you feel, not just what the wearable says. Save an OpenAI API key in You when you want a proper back-and-forth on the broader plan.';
+      return "Yes. Treat that as useful context and downshift today: reduce duration, keep intensity easy, or move the session to tomorrow. The plan should adapt to how you feel, not just what the wearable says. Save an OpenAI API key in You when you want a proper back-and-forth on the broader plan.";
     }
 
-    return 'I have captured that context. The cards show the data, but this is the kind of detail I should use to adapt the plan. Save an OpenAI API key in You when you want a proper AI coaching conversation around it.';
+    return "I have captured that context. The cards show the data, but this is the kind of detail I should use to adapt the plan. Save an OpenAI API key in You when you want a proper AI coaching conversation around it.";
   }
 
-  function makeIncrementalSyncRange(lastSuccessful: LastSync): SyncRange | null {
+  function makeIncrementalSyncRange(
+    lastSuccessful: LastSync,
+  ): SyncRange | null {
     if (!lastSuccessful) {
       return null;
     }
@@ -265,21 +325,23 @@ export default function App() {
     return { startDate, endDate };
   }
 
-  async function runSync(syncType: 'manual' | 'incremental' = 'manual') {
+  async function runSync(syncType: "manual" | "incremental" = "manual") {
     await ensureStoreReady();
 
     if (!canSync) {
-      setStatus('Use an iOS or Android dev build.');
+      setStatus("Use an iOS or Android dev build.");
       return;
     }
 
     const provider = currentHealthProviderId();
     const startedAt = new Date().toISOString();
     const syncRange =
-      syncType === 'incremental' ? makeIncrementalSyncRange(lastSuccessfulSync) : range;
+      syncType === "incremental"
+        ? makeIncrementalSyncRange(lastSuccessfulSync)
+        : range;
 
     if (!syncRange) {
-      setStatus('Run a manual sync before incremental sync.');
+      setStatus("Run a manual sync before incremental sync.");
       return;
     }
 
@@ -290,21 +352,30 @@ export default function App() {
     try {
       const result = await syncCurrentPlatform(syncRange);
       const saved = await upsertSyncPayload(result);
-      await recordSyncRun(result.provider, syncRange, saved, startedAt, undefined, {
-        syncType,
-        healthSampleCount: result.samples.length,
-        workoutCount: result.workouts.length,
-        sleepSessionCount: result.sleepSessions.length,
-        nutritionDayCount: result.nutritionDaily.length,
-        warningCount: result.warnings.length,
-        diagnosticCount: result.diagnostics.length,
-      });
+      await recordSyncRun(
+        result.provider,
+        syncRange,
+        saved,
+        startedAt,
+        undefined,
+        {
+          syncType,
+          healthSampleCount: result.samples.length,
+          workoutCount: result.workouts.length,
+          sleepSessionCount: result.sleepSessions.length,
+          nutritionDayCount: result.nutritionDaily.length,
+          warningCount: result.warnings.length,
+          diagnosticCount: result.diagnostics.length,
+        },
+      );
       setWarnings(result.warnings);
       setStatus(`Synced ${saved.toLocaleString()} records`);
       await refreshStore();
     } catch (error) {
       if (provider) {
-        await recordSyncRun(provider, syncRange, 0, startedAt, error, { syncType });
+        await recordSyncRun(provider, syncRange, 0, startedAt, error, {
+          syncType,
+        });
       }
       setStatus(String(error instanceof Error ? error.message : error));
       await refreshStore();
@@ -314,20 +385,26 @@ export default function App() {
   }
 
   async function syncDataAndStart() {
-    setActiveTab('coach');
-    setEntryMode('loading-start');
-    setStatus(canSync ? `Loading data from ${sourceLabel}` : 'Opening local health store');
+    setActiveTab("coach");
+    setEntryMode("loading-start");
+    setStatus(
+      canSync
+        ? `Loading data from ${sourceLabel}`
+        : "Opening local health store",
+    );
 
     await ensureStoreReady();
     await runSync();
-    setEntryMode('app');
+    setEntryMode("app");
   }
 
   async function runExport() {
     setBusy(true);
     try {
-      const fileUri = await exportPipelineJson();
-      setStatus(`Exported ${fileUri.split('/').pop()}`);
+      const result = await exportPipelineArtifacts();
+      setStatus(
+        `Exported ${result.jsonFileUri.split("/").pop()} and ${result.healthCheckFileUri.split("/").pop()}`,
+      );
     } catch (error) {
       setStatus(String(error instanceof Error ? error.message : error));
     } finally {
@@ -336,45 +413,49 @@ export default function App() {
   }
 
   function confirmClear() {
-    Alert.alert('Clear local data', 'Remove imported records, rollups, and sync history?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Clear',
-        style: 'destructive',
-        onPress: () => {
-          void clearPipeline()
-            .then(refreshStore)
-            .then(() => setStatus('Local pipeline cleared'));
+    Alert.alert(
+      "Clear local data",
+      "Remove imported records, rollups, and sync history?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: () => {
+            void clearPipeline()
+              .then(refreshStore)
+              .then(() => setStatus("Local pipeline cleared"));
+          },
         },
-      },
-    ]);
+      ],
+    );
   }
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="dark" />
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={0}
         style={styles.appShell}
       >
-        {entryMode === 'splash' ? (
+        {entryMode === "splash" ? (
           <SplashScreen
             busy={!storeReady}
-            onStartOnboarding={() => setEntryMode('onboarding')}
+            onStartOnboarding={() => setEntryMode("onboarding")}
             onSyncAndStart={() => void syncDataAndStart()}
             sourceLabel={sourceLabel}
-            status={storeReady ? status : 'Opening local health store'}
+            status={storeReady ? status : "Opening local health store"}
           />
         ) : null}
-        {entryMode === 'onboarding' ? (
+        {entryMode === "onboarding" ? (
           <CoachOnboardingScreen
             busy={busy}
             canSync={canSync}
             onComplete={(nextGoal) => {
               setGoalText(nextGoal);
-              setEntryMode('app');
-              setActiveTab('coach');
+              setEntryMode("app");
+              setActiveTab("coach");
             }}
             onSync={runSync}
             sourceLabel={sourceLabel}
@@ -382,10 +463,10 @@ export default function App() {
             snapshot={snapshot}
           />
         ) : null}
-        {entryMode === 'loading-start' ? (
+        {entryMode === "loading-start" ? (
           <StartLoadingScreen sourceLabel={sourceLabel} status={status} />
         ) : null}
-        {entryMode === 'app' && activeTab === 'coach' ? (
+        {entryMode === "app" && activeTab === "coach" ? (
           <CoachScreen
             busy={busy}
             coachBusy={coachBusy}
@@ -396,20 +477,20 @@ export default function App() {
             lastSync={lastSync}
             onChangeCoachDraft={setCoachDraft}
             onSendCoachMessage={submitCoachMessage}
-            onOpenWorkout={() => setActiveTab('workout')}
+            onOpenWorkout={() => setActiveTab("workout")}
             onSync={runSync}
             snapshot={snapshot}
             status={status}
             warnings={warnings}
           />
         ) : null}
-        {entryMode === 'app' && activeTab === 'workout' ? (
+        {entryMode === "app" && activeTab === "workout" ? (
           <WorkoutPlanScreen goalText={goalText} snapshot={snapshot} />
         ) : null}
-        {entryMode === 'app' && activeTab === 'history' ? (
+        {entryMode === "app" && activeTab === "history" ? (
           <HistoryScreen goalText={goalText} snapshot={snapshot} />
         ) : null}
-        {entryMode === 'app' && activeTab === 'you' ? (
+        {entryMode === "app" && activeTab === "you" ? (
           <SourceScreen
             apiKeyDraft={apiKeyDraft}
             appSettings={appSettings}
@@ -419,7 +500,7 @@ export default function App() {
             onClear={confirmClear}
             onClearApiKey={removeApiKey}
             onExport={runExport}
-            onIncrementalSync={() => void runSync('incremental')}
+            onIncrementalSync={() => void runSync("incremental")}
             onSaveApiKey={saveApiKey}
             onSetDefaultRange={setDefaultSyncRange}
             onSync={runSync}
@@ -432,7 +513,7 @@ export default function App() {
             status={status}
           />
         ) : null}
-        {!keyboardVisible && entryMode === 'app' ? (
+        {!keyboardVisible && entryMode === "app" ? (
           <TabBar active={activeTab} onChange={setActiveTab} />
         ) : null}
       </KeyboardAvoidingView>

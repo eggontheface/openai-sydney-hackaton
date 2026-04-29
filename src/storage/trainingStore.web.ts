@@ -8,14 +8,15 @@ import type {
   SourceFreshness,
   SyncPayload,
   SyncRange,
-} from '../health/types';
-import { emptySnapshot } from '../core/constants';
-import { buildTrainingLoadSnapshot } from '../coach/trainingLoad';
+} from "../health/types";
+import { emptySnapshot } from "../core/constants";
+import { buildTrainingLoadSnapshot } from "../coach/trainingLoad";
+import { buildPipelineExportArtifacts } from "../export/pipelineExport";
 import {
   normalizeGoalProfile,
   type GoalProfile,
   type GoalProfileDraft,
-} from '../goals/goalProfile';
+} from "../goals/goalProfile";
 
 export type HealthSampleRow = {
   sample_id: string;
@@ -30,7 +31,7 @@ export type HealthSampleRow = {
   timezone: string | null;
   value: number | null;
   unit: string | null;
-  hrv_method: 'rmssd' | 'sdnn' | null;
+  hrv_method: "rmssd" | "sdnn" | null;
   metadata_json: string;
   source_modified_at: string | null;
   imported_at: string;
@@ -45,7 +46,7 @@ export type WorkoutRow = {
   local_date: string;
   name: string | null;
   activity_type: string | null;
-  sport_bucket: 'run' | 'ride' | 'strength' | 'swim' | 'walk' | 'other';
+  sport_bucket: "run" | "ride" | "strength" | "swim" | "walk" | "other";
   elapsed_seconds: number;
   moving_seconds: number | null;
   distance_km: number | null;
@@ -63,7 +64,7 @@ export type WorkoutRow = {
 export type SyncRunRow = {
   id: number;
   provider: HealthProvider;
-  sync_type: 'manual' | 'incremental';
+  sync_type: "manual" | "incremental";
   started_at: string;
   ended_at: string;
   range_start: string;
@@ -75,18 +76,23 @@ export type SyncRunRow = {
   nutrition_day_count: number;
   warning_count: number;
   diagnostic_count: number;
-  status: 'ok' | 'error';
+  status: "ok" | "error";
   error: string | null;
 };
 
 export type SyncRunDetails = {
-  syncType?: SyncRunRow['sync_type'];
+  syncType?: SyncRunRow["sync_type"];
   healthSampleCount?: number;
   workoutCount?: number;
   sleepSessionCount?: number;
   nutritionDayCount?: number;
   warningCount?: number;
   diagnosticCount?: number;
+};
+
+export type PipelineExportResult = {
+  jsonFileUri: string;
+  healthCheckFileUri: string;
 };
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -98,8 +104,8 @@ function dateKey(offset = 0) {
 function day(offset = 0): DailyMetrics {
   return {
     date: dateKey(offset),
-    dataCompleteness: 'full',
-    wellnessDataStatus: 'Watch, sleep, workouts',
+    dataCompleteness: "full",
+    wellnessDataStatus: "Watch, sleep, workouts",
     sourceCount: 4,
     hasPlatformWellness: true,
     hasActivity: true,
@@ -111,7 +117,8 @@ function day(offset = 0): DailyMetrics {
     activeKcal: 520 - Math.abs(offset) * 12,
     totalKcal: 2240,
     distanceKm: 6.8,
-    sleepSeconds: offset === 0 ? 7.4 * 3600 : (7 + Math.abs(offset % 2) * 0.4) * 3600,
+    sleepSeconds:
+      offset === 0 ? 7.4 * 3600 : (7 + Math.abs(offset % 2) * 0.4) * 3600,
     timeInBedSeconds: 8 * 3600,
     sleepEfficiency: 0.91,
     restingHr: 51 + Math.abs(offset % 3),
@@ -119,10 +126,10 @@ function day(offset = 0): DailyMetrics {
     heartRateMinBpm: 45,
     heartRateMaxBpm: 161,
     hrvLastNightAvg: offset === 0 ? 62 : 56 + Math.abs(offset),
-    hrvMethod: 'rmssd',
-    hrvCanonicalType: 'hrv_rmssd',
-    hrvSourceApp: 'Apple Watch',
-    hrvSourceKey: 'Apple Watch',
+    hrvMethod: "rmssd",
+    hrvCanonicalType: "hrv_rmssd",
+    hrvSourceApp: "Apple Watch",
+    hrvSourceKey: "Apple Watch",
     hrvSampleCount: 1,
     workoutCount: offset === -1 || offset === -3 ? 1 : 0,
     runWorkoutCount: offset === -1 ? 1 : 0,
@@ -147,52 +154,82 @@ const history = Array.from({ length: 14 }, (_, index) => day(-index));
 const latestDate = dateKey(0);
 
 const demoMetricAvailability: MetricAvailability[] = [
-  { canonicalType: 'sleep_session', sampleCount: 14, dayCount: 14, latestDate },
-  { canonicalType: 'hrv_rmssd', sampleCount: 14, dayCount: 14, latestDate },
-  { canonicalType: 'resting_heart_rate', sampleCount: 14, dayCount: 14, latestDate },
-  { canonicalType: 'heart_rate', sampleCount: 96, dayCount: 14, latestDate },
-  { canonicalType: 'workout', sampleCount: 9, dayCount: 7, latestDate: dateKey(-1) },
-  { canonicalType: 'steps', sampleCount: 14, dayCount: 14, latestDate },
-  { canonicalType: 'active_energy', sampleCount: 14, dayCount: 14, latestDate },
-  { canonicalType: 'distance', sampleCount: 14, dayCount: 14, latestDate },
-  { canonicalType: 'nutrition', sampleCount: 8, dayCount: 8, latestDate },
-  { canonicalType: 'hydration', sampleCount: 8, dayCount: 8, latestDate },
-  { canonicalType: 'weight', sampleCount: 4, dayCount: 4, latestDate: dateKey(-1) },
-  { canonicalType: 'body_fat', sampleCount: 4, dayCount: 4, latestDate: dateKey(-1) },
-  { canonicalType: 'lean_body_mass', sampleCount: 4, dayCount: 4, latestDate: dateKey(-1) },
-  { canonicalType: 'vo2max', sampleCount: 2, dayCount: 2, latestDate: dateKey(-2) },
+  { canonicalType: "sleep_session", sampleCount: 14, dayCount: 14, latestDate },
+  { canonicalType: "hrv_rmssd", sampleCount: 14, dayCount: 14, latestDate },
+  {
+    canonicalType: "resting_heart_rate",
+    sampleCount: 14,
+    dayCount: 14,
+    latestDate,
+  },
+  { canonicalType: "heart_rate", sampleCount: 96, dayCount: 14, latestDate },
+  {
+    canonicalType: "workout",
+    sampleCount: 9,
+    dayCount: 7,
+    latestDate: dateKey(-1),
+  },
+  { canonicalType: "steps", sampleCount: 14, dayCount: 14, latestDate },
+  { canonicalType: "active_energy", sampleCount: 14, dayCount: 14, latestDate },
+  { canonicalType: "distance", sampleCount: 14, dayCount: 14, latestDate },
+  { canonicalType: "nutrition", sampleCount: 8, dayCount: 8, latestDate },
+  { canonicalType: "hydration", sampleCount: 8, dayCount: 8, latestDate },
+  {
+    canonicalType: "weight",
+    sampleCount: 4,
+    dayCount: 4,
+    latestDate: dateKey(-1),
+  },
+  {
+    canonicalType: "body_fat",
+    sampleCount: 4,
+    dayCount: 4,
+    latestDate: dateKey(-1),
+  },
+  {
+    canonicalType: "lean_body_mass",
+    sampleCount: 4,
+    dayCount: 4,
+    latestDate: dateKey(-1),
+  },
+  {
+    canonicalType: "vo2max",
+    sampleCount: 2,
+    dayCount: 2,
+    latestDate: dateKey(-2),
+  },
 ];
 
 const demoDiagnostics: HealthConnectReadDiagnostic[] = [
   {
-    recordType: 'SleepSession',
-    canonicalType: 'sleep_session',
-    permission: 'granted',
-    readKind: 'records',
+    recordType: "SleepSession",
+    canonicalType: "sleep_session",
+    permission: "granted",
+    readKind: "records",
     recordsRead: 14,
     samplesWritten: 14,
   },
   {
-    recordType: 'HeartRate',
-    canonicalType: 'heart_rate',
-    permission: 'granted',
-    readKind: 'records',
+    recordType: "HeartRate",
+    canonicalType: "heart_rate",
+    permission: "granted",
+    readKind: "records",
     recordsRead: 96,
     samplesWritten: 96,
   },
   {
-    recordType: 'RestingHeartRate',
-    canonicalType: 'resting_heart_rate',
-    permission: 'granted',
-    readKind: 'records',
+    recordType: "RestingHeartRate",
+    canonicalType: "resting_heart_rate",
+    permission: "granted",
+    readKind: "records",
     recordsRead: 14,
     samplesWritten: 14,
   },
   {
-    recordType: 'HeartRateVariabilityRmssd',
-    canonicalType: 'hrv_rmssd',
-    permission: 'granted',
-    readKind: 'records',
+    recordType: "HeartRateVariabilityRmssd",
+    canonicalType: "hrv_rmssd",
+    permission: "granted",
+    readKind: "records",
     recordsRead: 14,
     samplesWritten: 14,
   },
@@ -200,22 +237,24 @@ const demoDiagnostics: HealthConnectReadDiagnostic[] = [
 
 const demoSourceFreshness: SourceFreshness[] = [
   {
-    domain: 'sleep',
-    label: 'Sleep',
-    state: 'fresh',
-    canonicalTypes: ['sleep_session'],
+    domain: "sleep",
+    label: "Sleep",
+    state: "fresh",
+    canonicalTypes: ["sleep_session"],
     sampleCount: 14,
     dayCount: 14,
     latestLocalDate: latestDate,
     lastUpdatedAt: `${latestDate}T06:45:00.000Z`,
     ageDays: 0,
-    limitations: ['Demo HRV is RMSSD; SDNN from Apple Health would use its own baseline.'],
+    limitations: [
+      "Demo HRV is RMSSD; SDNN from Apple Health would use its own baseline.",
+    ],
   },
   {
-    domain: 'workouts',
-    label: 'Workouts',
-    state: 'fresh',
-    canonicalTypes: ['workout'],
+    domain: "workouts",
+    label: "Workouts",
+    state: "fresh",
+    canonicalTypes: ["workout"],
     sampleCount: 9,
     dayCount: 7,
     latestLocalDate: dateKey(-1),
@@ -224,34 +263,38 @@ const demoSourceFreshness: SourceFreshness[] = [
     limitations: [],
   },
   {
-    domain: 'steps',
-    label: 'Steps',
-    state: 'partial',
-    canonicalTypes: ['steps'],
+    domain: "steps",
+    label: "Steps",
+    state: "partial",
+    canonicalTypes: ["steps"],
     sampleCount: 14,
     dayCount: 14,
     latestLocalDate: latestDate,
     lastUpdatedAt: `${latestDate}T10:15:00.000Z`,
     ageDays: 0,
-    limitations: ['Today is still in progress; this domain may change after the next sync.'],
+    limitations: [
+      "Today is still in progress; this domain may change after the next sync.",
+    ],
   },
   {
-    domain: 'energy',
-    label: 'Energy',
-    state: 'partial',
-    canonicalTypes: ['active_energy', 'total_energy'],
+    domain: "energy",
+    label: "Energy",
+    state: "partial",
+    canonicalTypes: ["active_energy", "total_energy"],
     sampleCount: 28,
     dayCount: 14,
     latestLocalDate: latestDate,
     lastUpdatedAt: `${latestDate}T10:15:00.000Z`,
     ageDays: 0,
-    limitations: ['Today is still in progress; this domain may change after the next sync.'],
+    limitations: [
+      "Today is still in progress; this domain may change after the next sync.",
+    ],
   },
   {
-    domain: 'hrv',
-    label: 'HRV',
-    state: 'fresh',
-    canonicalTypes: ['hrv_rmssd', 'hrv_sdnn'],
+    domain: "hrv",
+    label: "HRV",
+    state: "fresh",
+    canonicalTypes: ["hrv_rmssd", "hrv_sdnn"],
     sampleCount: 14,
     dayCount: 14,
     latestLocalDate: latestDate,
@@ -260,10 +303,10 @@ const demoSourceFreshness: SourceFreshness[] = [
     limitations: [],
   },
   {
-    domain: 'resting_hr',
-    label: 'Resting HR',
-    state: 'fresh',
-    canonicalTypes: ['resting_heart_rate'],
+    domain: "resting_hr",
+    label: "Resting HR",
+    state: "fresh",
+    canonicalTypes: ["resting_heart_rate"],
     sampleCount: 14,
     dayCount: 14,
     latestLocalDate: latestDate,
@@ -272,34 +315,38 @@ const demoSourceFreshness: SourceFreshness[] = [
     limitations: [],
   },
   {
-    domain: 'nutrition',
-    label: 'Nutrition',
-    state: 'partial',
-    canonicalTypes: ['nutrition'],
+    domain: "nutrition",
+    label: "Nutrition",
+    state: "partial",
+    canonicalTypes: ["nutrition"],
     sampleCount: 8,
     dayCount: 8,
     latestLocalDate: latestDate,
     lastUpdatedAt: `${latestDate}T09:00:00.000Z`,
     ageDays: 0,
-    limitations: ['Today is still in progress; this domain may change after the next sync.'],
+    limitations: [
+      "Today is still in progress; this domain may change after the next sync.",
+    ],
   },
   {
-    domain: 'hydration',
-    label: 'Hydration',
-    state: 'partial',
-    canonicalTypes: ['hydration'],
+    domain: "hydration",
+    label: "Hydration",
+    state: "partial",
+    canonicalTypes: ["hydration"],
     sampleCount: 8,
     dayCount: 8,
     latestLocalDate: latestDate,
     lastUpdatedAt: `${latestDate}T09:30:00.000Z`,
     ageDays: 0,
-    limitations: ['Today is still in progress; this domain may change after the next sync.'],
+    limitations: [
+      "Today is still in progress; this domain may change after the next sync.",
+    ],
   },
   {
-    domain: 'body_composition',
-    label: 'Body composition',
-    state: 'fresh',
-    canonicalTypes: ['weight', 'body_fat', 'lean_body_mass'],
+    domain: "body_composition",
+    label: "Body composition",
+    state: "fresh",
+    canonicalTypes: ["weight", "body_fat", "lean_body_mass"],
     sampleCount: 12,
     dayCount: 4,
     latestLocalDate: dateKey(-1),
@@ -308,13 +355,13 @@ const demoSourceFreshness: SourceFreshness[] = [
     limitations: [],
   },
   {
-    domain: 'check_ins',
-    label: 'Check-ins',
-    state: 'missing',
+    domain: "check_ins",
+    label: "Check-ins",
+    state: "missing",
     canonicalTypes: [],
     sampleCount: 0,
     dayCount: 0,
-    limitations: ['Daily check-ins are not implemented in local storage yet.'],
+    limitations: ["Daily check-ins are not implemented in local storage yet."],
   },
 ];
 
@@ -331,70 +378,75 @@ const demoSnapshot: PipelineSnapshot = {
   history,
   recentWorkouts: [
     {
-      workoutId: 'demo-run-1',
-      platform: 'healthkit',
-      sourceApp: 'Apple Watch',
+      workoutId: "demo-run-1",
+      platform: "healthkit",
+      sourceApp: "Apple Watch",
       startAt: `${dateKey(-1)}T07:10:00.000Z`,
       endAt: `${dateKey(-1)}T07:52:00.000Z`,
       localDate: dateKey(-1),
-      name: 'Easy Run',
-      activityType: 'Running',
-      sportBucket: 'run',
+      name: "Easy Run",
+      activityType: "Running",
+      sportBucket: "run",
       elapsedSeconds: 2520,
       distanceKm: 6.4,
       activeKcal: 438,
       avgHrBpm: 142,
       maxHrBpm: 166,
       routeAvailable: true,
-      rawJson: '{}',
+      rawJson: "{}",
     },
     {
-      workoutId: 'demo-strength-1',
-      platform: 'healthkit',
-      sourceApp: 'Strength Log',
+      workoutId: "demo-strength-1",
+      platform: "healthkit",
+      sourceApp: "Strength Log",
       startAt: `${dateKey(-3)}T18:20:00.000Z`,
       endAt: `${dateKey(-3)}T19:02:00.000Z`,
       localDate: dateKey(-3),
-      name: 'Lower Strength',
-      activityType: 'Traditional Strength Training',
-      sportBucket: 'strength',
+      name: "Lower Strength",
+      activityType: "Traditional Strength Training",
+      sportBucket: "strength",
       elapsedSeconds: 2520,
       activeKcal: 220,
-      rawJson: '{}',
+      rawJson: "{}",
     },
   ],
   recentSamples: [],
   trainingLoad: buildTrainingLoadSnapshot(),
   recommendation: {
     readiness: 78,
-    readinessLabel: 'Primed',
-    color: 'positive',
-    title: 'Aerobic base',
-    detail: '40 min easy run, stay conversational',
+    readinessLabel: "Primed",
+    color: "positive",
+    title: "Aerobic base",
+    detail: "40 min easy run, stay conversational",
     reason:
-      'Sleep is solid, RMSSD HRV is above its matching baseline, and training load is unavailable, so this uses workout history conservatively.',
-    opener: 'Morning. Your wearable data already shows a strong recovery profile today.',
+      "Sleep is solid, RMSSD HRV is above its matching baseline, and training load is unavailable, so this uses workout history conservatively.",
+    opener:
+      "Morning. Your wearable data already shows a strong recovery profile today.",
     strain: 9.5,
-    strainTarget: '8-11',
+    strainTarget: "8-11",
   },
 };
 
 let lastSync: SyncRunRow | null = {
   id: 1,
-  provider: 'healthkit',
-  sync_type: 'manual',
+  provider: "healthkit",
+  sync_type: "manual",
   started_at: new Date(Date.now() - 38 * 60 * 1000).toISOString(),
   ended_at: new Date(Date.now() - 37 * 60 * 1000).toISOString(),
   range_start: dateKey(-7),
   range_end: dateKey(0),
   sample_count: demoSnapshot.totalSamples,
-  health_sample_count: demoSnapshot.totalSamples - demoSnapshot.workoutCount - demoSnapshot.sleepCount - demoSnapshot.nutritionDays,
+  health_sample_count:
+    demoSnapshot.totalSamples -
+    demoSnapshot.workoutCount -
+    demoSnapshot.sleepCount -
+    demoSnapshot.nutritionDays,
   workout_count: demoSnapshot.workoutCount,
   sleep_session_count: demoSnapshot.sleepCount,
   nutrition_day_count: demoSnapshot.nutritionDays,
   warning_count: 0,
   diagnostic_count: demoDiagnostics.length,
-  status: 'ok',
+  status: "ok",
   error: null,
 };
 
@@ -402,17 +454,18 @@ let syncRuns: SyncRunRow[] = lastSync ? [lastSync] : [];
 let demoCleared = false;
 
 let goalProfile: GoalProfile | null = normalizeGoalProfile({
-  primaryGoal: 'endurance',
-  secondaryGoals: ['strength'],
-  motivation: 'Build toward a confident half marathon block without overreaching.',
-  timeframe: '12 weeks',
-  experienceLevel: 'recreational',
-  preferredActivities: ['run', 'strength', 'walk'],
+  primaryGoal: "endurance",
+  secondaryGoals: ["strength"],
+  motivation:
+    "Build toward a confident half marathon block without overreaching.",
+  timeframe: "12 weeks",
+  experienceLevel: "recreational",
+  preferredActivities: ["run", "strength", "walk"],
   dislikedActivities: [],
-  constraints: ['protect recovery', 'avoid sudden volume jumps'],
+  constraints: ["protect recovery", "avoid sudden volume jumps"],
   riskFlags: [],
-  coachingStyle: 'supportive',
-  startingStrategy: 'conservative_build',
+  coachingStyle: "supportive",
+  startingStrategy: "conservative_build",
   confidence: 0.74,
 });
 
@@ -422,7 +475,9 @@ export async function getGoalProfile(): Promise<GoalProfile | null> {
   return goalProfile;
 }
 
-export async function saveGoalProfile(draft: GoalProfileDraft): Promise<GoalProfile> {
+export async function saveGoalProfile(
+  draft: GoalProfileDraft,
+): Promise<GoalProfile> {
   goalProfile = normalizeGoalProfile({
     ...(goalProfile ?? {}),
     ...draft,
@@ -456,7 +511,7 @@ export async function recordSyncRun(
   lastSync = {
     id: Date.now(),
     provider,
-    sync_type: details.syncType ?? 'manual',
+    sync_type: details.syncType ?? "manual",
     started_at: startedAt,
     ended_at: new Date().toISOString(),
     range_start: range.startDate.toISOString(),
@@ -468,8 +523,9 @@ export async function recordSyncRun(
     nutrition_day_count: details.nutritionDayCount ?? 0,
     warning_count: details.warningCount ?? 0,
     diagnostic_count: details.diagnosticCount ?? 0,
-    status: error ? 'error' : 'ok',
-    error: error instanceof Error ? error.message : error ? String(error) : null,
+    status: error ? "error" : "ok",
+    error:
+      error instanceof Error ? error.message : error ? String(error) : null,
   };
   syncRuns = [lastSync, ...syncRuns].slice(0, 12);
 }
@@ -478,7 +534,11 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
   return demoCleared ? emptySnapshot : demoSnapshot;
 }
 
-function demoTableCount(total: number, firstDate: string | null, latestDate: string | null) {
+function demoTableCount(
+  total: number,
+  firstDate: string | null,
+  latestDate: string | null,
+) {
   return {
     total,
     first_date: firstDate,
@@ -486,7 +546,9 @@ function demoTableCount(total: number, firstDate: string | null, latestDate: str
   };
 }
 
-export async function getCoachHealthContext(_options: { rebuildDaily?: boolean } = {}) {
+export async function getCoachHealthContext(
+  _options: { rebuildDaily?: boolean } = {},
+) {
   if (demoCleared) {
     return {
       generatedAt: new Date().toISOString(),
@@ -512,7 +574,7 @@ export async function getCoachHealthContext(_options: { rebuildDaily?: boolean }
       recentDailyMetrics: [],
       recentWorkouts: [],
       coachDataInstruction:
-        'The web demo dataset was cleared. Treat health data as unavailable until a new demo or native sync is connected.',
+        "The web demo dataset was cleared. Treat health data as unavailable until a new demo or native sync is connected.",
     };
   }
 
@@ -539,10 +601,26 @@ export async function getCoachHealthContext(_options: { rebuildDaily?: boolean }
     generatedAt: new Date().toISOString(),
     hasSyncedHealthData: true,
     sqliteTables: {
-      healthSamples: demoTableCount(demoSnapshot.totalSamples, firstDate, latestDate),
-      sleepSessions: demoTableCount(demoSnapshot.sleepCount, firstDate, latestDate),
-      workouts: demoTableCount(demoSnapshot.workoutCount, dateKey(-12), dateKey(-1)),
-      nutritionDaily: demoTableCount(demoSnapshot.nutritionDays, dateKey(-12), latestDate),
+      healthSamples: demoTableCount(
+        demoSnapshot.totalSamples,
+        firstDate,
+        latestDate,
+      ),
+      sleepSessions: demoTableCount(
+        demoSnapshot.sleepCount,
+        firstDate,
+        latestDate,
+      ),
+      workouts: demoTableCount(
+        demoSnapshot.workoutCount,
+        dateKey(-12),
+        dateKey(-1),
+      ),
+      nutritionDaily: demoTableCount(
+        demoSnapshot.nutritionDays,
+        dateKey(-12),
+        latestDate,
+      ),
       dailyMetrics: demoTableCount(history.length, firstDate, latestDate),
       syncRuns,
     },
@@ -550,32 +628,32 @@ export async function getCoachHealthContext(_options: { rebuildDaily?: boolean }
     sourceFreshness: demoSourceFreshness,
     latestSamplesByType: [
       {
-        canonicalType: 'hrv_rmssd' as CanonicalType,
-        recordType: 'HeartRateVariabilityRmssd',
-        sourceApp: 'Apple Watch',
+        canonicalType: "hrv_rmssd" as CanonicalType,
+        recordType: "HeartRateVariabilityRmssd",
+        sourceApp: "Apple Watch",
         localDate: latestDate,
         startAt: `${latestDate}T06:45:00.000Z`,
         value: history[0].hrvLastNightAvg,
-        unit: 'ms',
-        hrvMethod: 'rmssd' as const,
+        unit: "ms",
+        hrvMethod: "rmssd" as const,
       },
       {
-        canonicalType: 'resting_heart_rate' as CanonicalType,
-        recordType: 'RestingHeartRate',
-        sourceApp: 'Apple Watch',
+        canonicalType: "resting_heart_rate" as CanonicalType,
+        recordType: "RestingHeartRate",
+        sourceApp: "Apple Watch",
         localDate: latestDate,
         startAt: `${latestDate}T06:45:00.000Z`,
         value: history[0].restingHr,
-        unit: 'bpm',
+        unit: "bpm",
       },
       {
-        canonicalType: 'steps' as CanonicalType,
-        recordType: 'Steps',
-        sourceApp: 'Apple Watch',
+        canonicalType: "steps" as CanonicalType,
+        recordType: "Steps",
+        sourceApp: "Apple Watch",
         localDate: latestDate,
         startAt: `${latestDate}T23:59:00.000Z`,
         value: history[0].steps,
-        unit: 'count',
+        unit: "count",
       },
     ],
     recentDailyMetrics: demoSnapshot.history.slice(0, 7),
@@ -591,7 +669,7 @@ export async function getCoachHealthContext(_options: { rebuildDaily?: boolean }
       sourceApp: workout.sourceApp,
     })),
     coachDataInstruction:
-      'Expo web is using local mock SQLite-style demo data. Treat it as synced demo health data, not live device records.',
+      "Expo web is using local mock SQLite-style demo data. Treat it as synced demo health data, not live device records.",
   };
 }
 
@@ -600,7 +678,7 @@ export async function getLastSyncRun(): Promise<SyncRunRow | null> {
 }
 
 export async function getLastSuccessfulSyncRun(): Promise<SyncRunRow | null> {
-  return syncRuns.find((run) => run.status === 'ok') ?? null;
+  return syncRuns.find((run) => run.status === "ok") ?? null;
 }
 
 export async function getRecentSyncRuns(limit = 6): Promise<SyncRunRow[]> {
@@ -621,6 +699,16 @@ export async function clearPipeline(): Promise<void> {
   syncRuns = [];
 }
 
+export async function exportPipelineArtifacts(): Promise<PipelineExportResult> {
+  const artifacts = buildPipelineExportArtifacts(demoSnapshot);
+
+  return {
+    jsonFileUri: `web-demo://${artifacts.jsonFileName}`,
+    healthCheckFileUri: `web-demo://${artifacts.healthCheckFileName}`,
+  };
+}
+
 export async function exportPipelineJson(): Promise<string> {
-  return 'web-demo://biostream-pipeline.json';
+  const result = await exportPipelineArtifacts();
+  return result.jsonFileUri;
 }
