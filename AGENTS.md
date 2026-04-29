@@ -19,6 +19,9 @@ You are collaborating with multiple developers and need to move fast. Favor smal
 
 - Read just enough surrounding code and docs to avoid breaking the app.
 - Prefer existing app patterns over new abstractions.
+- Favor test-driven development for code changes: write or update the focused failing test first, run it to see the expected failure, implement the smallest change, then rerun the test.
+- For refactors, add or update smoke/contract tests that protect the public boundary before moving code.
+- Skip test-first only for docs-only changes, purely mechanical file moves that are already covered by typecheck/tests, or urgent hackathon fixes where the PR explicitly states the skipped test coverage.
 - Keep commits focused, but do not over-polish.
 - The default preview path should stay regular Expo:
   `npm start -- -c`
