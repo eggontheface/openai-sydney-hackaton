@@ -311,7 +311,7 @@ const sourceFreshnessConfigs: SourceFreshnessConfig[] = [
   {
     domain: 'hrv',
     label: 'HRV',
-    canonicalTypes: ['hrv_rmssd'],
+    canonicalTypes: ['hrv_rmssd', 'hrv_sdnn'],
     maxFreshAgeDays: 1,
     source: 'samples',
     missingLimitation: 'No imported HRV samples are available.',
@@ -560,6 +560,7 @@ function canonicalTypeLabel(type: CanonicalType): string {
     heart_rate: 'heart rate',
     hydration: 'hydration',
     hrv_rmssd: 'HRV',
+    hrv_sdnn: 'HRV SDNN',
     lean_body_mass: 'lean mass',
     nutrition: 'nutrition',
     resting_heart_rate: 'resting heart rate',
@@ -765,7 +766,7 @@ function buildFreshnessLimitations({
     const missingLabels = Array.from(
       new Set(missingPermissions.map((diagnostic) => canonicalTypeLabel(diagnostic.canonical_type))),
     );
-    limitations.push(`Missing Health Connect permission for ${missingLabels.join(', ')}.`);
+    limitations.push(`Missing health data permission for ${missingLabels.join(', ')}.`);
   }
 
   const emptyReads = relevantDiagnostics.filter(
@@ -778,7 +779,7 @@ function buildFreshnessLimitations({
     const emptyLabels = Array.from(
       new Set(emptyReads.map((diagnostic) => canonicalTypeLabel(diagnostic.canonical_type))),
     );
-    limitations.push(`Latest Health Connect read returned no ${emptyLabels.join(', ')} data.`);
+    limitations.push(`Latest health data read returned no ${emptyLabels.join(', ')} data.`);
   }
 
   return Array.from(new Set(limitations));

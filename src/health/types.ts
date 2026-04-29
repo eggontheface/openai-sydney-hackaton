@@ -10,6 +10,7 @@ export type CanonicalType =
   | 'heart_rate'
   | 'resting_heart_rate'
   | 'hrv_rmssd'
+  | 'hrv_sdnn'
   | 'sleep_session'
   | 'workout'
   | 'weight'

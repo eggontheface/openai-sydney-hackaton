@@ -221,7 +221,7 @@ const demoSourceFreshness: SourceFreshness[] = [
     domain: 'hrv',
     label: 'HRV',
     state: 'fresh',
-    canonicalTypes: ['hrv_rmssd'],
+    canonicalTypes: ['hrv_rmssd', 'hrv_sdnn'],
     sampleCount: 14,
     dayCount: 14,
     latestLocalDate: latestDate,
