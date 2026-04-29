@@ -33,6 +33,7 @@ export type SourceFreshnessDomain =
   | 'hrv'
   | 'resting_hr'
   | 'nutrition'
+  | 'hydration'
   | 'body_composition'
   | 'check_ins';
 
@@ -114,12 +115,28 @@ export type NutritionDailyRecord = {
   proteinG?: number;
   carbsG?: number;
   fatG?: number;
+  saturatedFatG?: number;
+  monounsaturatedFatG?: number;
+  polyunsaturatedFatG?: number;
+  transFatG?: number;
   fiberG?: number;
   sugarG?: number;
   cholesterolMg?: number;
   waterMl?: number;
   caffeineMg?: number;
   sodiumMg?: number;
+  potassiumMg?: number;
+  calciumMg?: number;
+  ironMg?: number;
+  magnesiumMg?: number;
+  zincMg?: number;
+  vitaminAMcg?: number;
+  vitaminB6Mg?: number;
+  vitaminB12Mcg?: number;
+  vitaminCMg?: number;
+  vitaminDMcg?: number;
+  vitaminEMg?: number;
+  vitaminKMcg?: number;
   entryCount: number;
   mealCount?: number;
   allNutrientsJson: string;
@@ -193,8 +210,27 @@ export type DailyMetrics = {
   proteinG?: number;
   carbsG?: number;
   fatG?: number;
+  saturatedFatG?: number;
+  monounsaturatedFatG?: number;
+  polyunsaturatedFatG?: number;
+  transFatG?: number;
   fiberG?: number;
   sugarG?: number;
+  cholesterolMg?: number;
+  caffeineMg?: number;
+  sodiumMg?: number;
+  potassiumMg?: number;
+  calciumMg?: number;
+  ironMg?: number;
+  magnesiumMg?: number;
+  zincMg?: number;
+  vitaminAMcg?: number;
+  vitaminB6Mg?: number;
+  vitaminB12Mcg?: number;
+  vitaminCMg?: number;
+  vitaminDMcg?: number;
+  vitaminEMg?: number;
+  vitaminKMcg?: number;
   waterMl?: number;
   weightKg?: number;
   bodyFatPct?: number;
