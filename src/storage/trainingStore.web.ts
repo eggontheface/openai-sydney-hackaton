@@ -9,6 +9,11 @@ import type {
   SyncPayload,
   SyncRange,
 } from '../health/types';
+import {
+  normalizeGoalProfile,
+  type GoalProfile,
+  type GoalProfileDraft,
+} from '../goals/goalProfile';
 
 export type HealthSampleRow = {
   sample_id: string;
@@ -23,6 +28,7 @@ export type HealthSampleRow = {
   timezone: string | null;
   value: number | null;
   unit: string | null;
+  hrv_method: 'rmssd' | 'sdnn' | null;
   metadata_json: string;
   source_modified_at: string | null;
   imported_at: string;
@@ -94,6 +100,11 @@ function day(offset = 0): DailyMetrics {
     heartRateMinBpm: 45,
     heartRateMaxBpm: 161,
     hrvLastNightAvg: offset === 0 ? 62 : 56 + Math.abs(offset),
+    hrvMethod: 'rmssd',
+    hrvCanonicalType: 'hrv_rmssd',
+    hrvSourceApp: 'Apple Watch',
+    hrvSourceKey: 'Apple Watch',
+    hrvSampleCount: 1,
     workoutCount: offset === -1 || offset === -3 ? 1 : 0,
     runWorkoutCount: offset === -1 ? 1 : 0,
     rideWorkoutCount: 0,
@@ -179,7 +190,7 @@ const demoSourceFreshness: SourceFreshness[] = [
     latestLocalDate: latestDate,
     lastUpdatedAt: `${latestDate}T06:45:00.000Z`,
     ageDays: 0,
-    limitations: [],
+    limitations: ['Demo HRV is RMSSD; SDNN from Apple Health would use its own baseline.'],
   },
   {
     domain: 'workouts',
@@ -221,7 +232,7 @@ const demoSourceFreshness: SourceFreshness[] = [
     domain: 'hrv',
     label: 'HRV',
     state: 'fresh',
-    canonicalTypes: ['hrv_rmssd'],
+    canonicalTypes: ['hrv_rmssd', 'hrv_sdnn'],
     sampleCount: 14,
     dayCount: 14,
     latestLocalDate: latestDate,
@@ -340,7 +351,7 @@ const demoSnapshot: PipelineSnapshot = {
     color: 'positive',
     title: 'Aerobic base',
     detail: '40 min easy run, stay conversational',
-    reason: 'Sleep is solid, HRV is above baseline, and recent training load is consistent.',
+    reason: 'Sleep is solid, RMSSD HRV is above its matching baseline, and recent training load is consistent.',
     opener: 'Morning. Your wearable data already shows a strong recovery profile today.',
     strain: 9.5,
     strainTarget: '8-11',
@@ -359,7 +370,38 @@ let lastSync: SyncRunRow | null = {
   error: null,
 };
 
+let goalProfile: GoalProfile | null = normalizeGoalProfile({
+  primaryGoal: 'endurance',
+  secondaryGoals: ['strength'],
+  motivation: 'Build toward a confident half marathon block without overreaching.',
+  timeframe: '12 weeks',
+  experienceLevel: 'recreational',
+  preferredActivities: ['run', 'strength', 'walk'],
+  dislikedActivities: [],
+  constraints: ['protect recovery', 'avoid sudden volume jumps'],
+  riskFlags: [],
+  coachingStyle: 'supportive',
+  startingStrategy: 'conservative_build',
+  confidence: 0.74,
+});
+
 export async function initTrainingStore(): Promise<void> {}
+
+export async function getGoalProfile(): Promise<GoalProfile | null> {
+  return goalProfile;
+}
+
+export async function saveGoalProfile(draft: GoalProfileDraft): Promise<GoalProfile> {
+  goalProfile = normalizeGoalProfile({
+    ...(goalProfile ?? {}),
+    ...draft,
+  });
+  return goalProfile;
+}
+
+export async function clearGoalProfile(): Promise<void> {
+  goalProfile = null;
+}
 
 export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
   return (
@@ -444,6 +486,7 @@ export async function getCoachHealthContext(_options: { rebuildDaily?: boolean }
         startAt: `${latestDate}T06:45:00.000Z`,
         value: history[0].hrvLastNightAvg,
         unit: 'ms',
+        hrvMethod: 'rmssd' as const,
       },
       {
         canonicalType: 'resting_heart_rate' as CanonicalType,

@@ -1,5 +1,12 @@
 import { localDateKey } from '../lib/dates';
-import type { CanonicalType, DailyMetrics, HealthProvider } from '../health/types';
+import type {
+  CanonicalType,
+  DailyMetrics,
+  HealthProvider,
+  HrvBaselineStatus,
+  HrvCanonicalType,
+  HrvMethod,
+} from '../health/types';
 
 export type DailyWorkoutRollup = {
   workoutCount: number;
@@ -61,6 +68,11 @@ export type DailyMetricsRollupInput = {
   heartRateMinBpm?: number;
   heartRateMaxBpm?: number;
   hrvLastNightAvg?: number;
+  hrvMethod?: HrvMethod;
+  hrvCanonicalType?: HrvCanonicalType;
+  hrvSourceApp?: string;
+  hrvSourceKey?: string;
+  hrvSampleCount?: number;
   workout: DailyWorkoutRollup;
   nutrition?: DailyNutritionRollup | null;
   weightKg?: number;
@@ -95,8 +107,14 @@ export type NormalizedLegacyHealthSample = {
   localDate: string;
   value: number | null;
   unit: string | null;
+  hrvMethod: HrvMethod | null;
   metadataJson: string;
   importedAt: string;
+};
+
+const hrvMethodByCanonicalType: Partial<Record<CanonicalType, HrvMethod>> = {
+  hrv_rmssd: 'rmssd',
+  hrv_sdnn: 'sdnn',
 };
 
 function optionalNumber(value: number | null | undefined): number | undefined {
@@ -105,6 +123,110 @@ function optionalNumber(value: number | null | undefined): number | undefined {
 
 function hasValue(value: number | null | undefined): boolean {
   return value != null;
+}
+
+function average(values: number[]): number | undefined {
+  if (!values.length) {
+    return undefined;
+  }
+
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+export function hrvMethodForCanonicalType(type: CanonicalType): HrvMethod | undefined {
+  return hrvMethodByCanonicalType[type];
+}
+
+export function hrvMethodLabel(method?: HrvMethod): string {
+  if (method === 'rmssd') return 'RMSSD';
+  if (method === 'sdnn') return 'SDNN';
+  return 'HRV';
+}
+
+type HrvComparableDay = Pick<
+  DailyMetrics,
+  'date' | 'hrvLastNightAvg' | 'hrvMethod' | 'hrvCanonicalType' | 'hrvSourceKey'
+>;
+
+export type HrvBaselineResult = {
+  status: HrvBaselineStatus;
+  baseline?: number;
+  delta?: number;
+  compatibleDays: number;
+  incompatibleDays: number;
+  method?: HrvMethod;
+  canonicalType?: HrvCanonicalType;
+  sourceKey?: string;
+};
+
+function hasCompatibleHrvKey(current: HrvComparableDay, candidate: HrvComparableDay): boolean {
+  if (candidate.hrvLastNightAvg == null) {
+    return false;
+  }
+
+  if (
+    !current.hrvMethod ||
+    !candidate.hrvMethod ||
+    current.hrvMethod !== candidate.hrvMethod
+  ) {
+    return false;
+  }
+
+  if (
+    current.hrvCanonicalType &&
+    candidate.hrvCanonicalType &&
+    current.hrvCanonicalType !== candidate.hrvCanonicalType
+  ) {
+    return false;
+  }
+
+  if (current.hrvSourceKey || candidate.hrvSourceKey) {
+    return current.hrvSourceKey === candidate.hrvSourceKey;
+  }
+
+  return true;
+}
+
+export function hrvBaselineFor(
+  current: HrvComparableDay | null | undefined,
+  history: HrvComparableDay[],
+  maxDays = 14,
+): HrvBaselineResult {
+  if (current?.hrvLastNightAvg == null || !current.hrvMethod) {
+    return {
+      status: 'missing_current',
+      compatibleDays: 0,
+      incompatibleDays: 0,
+    };
+  }
+
+  const baselineRows = history.filter((row) => row.date !== current.date).slice(0, maxDays);
+  const hrvRows = baselineRows.filter((row) => row.hrvLastNightAvg != null);
+  const compatibleRows = hrvRows.filter((row) => hasCompatibleHrvKey(current, row));
+  const incompatibleDays = hrvRows.length - compatibleRows.length;
+  const baseline = average(compatibleRows.map((row) => row.hrvLastNightAvg as number));
+
+  if (baseline == null) {
+    return {
+      status: incompatibleDays ? 'method_incompatible' : 'insufficient_baseline',
+      compatibleDays: 0,
+      incompatibleDays,
+      method: current.hrvMethod,
+      canonicalType: current.hrvCanonicalType,
+      sourceKey: current.hrvSourceKey,
+    };
+  }
+
+  return {
+    status: 'compatible',
+    baseline,
+    delta: current.hrvLastNightAvg - baseline,
+    compatibleDays: compatibleRows.length,
+    incompatibleDays,
+    method: current.hrvMethod,
+    canonicalType: current.hrvCanonicalType,
+    sourceKey: current.hrvSourceKey,
+  };
 }
 
 export function buildDailyMetricsRollup(input: DailyMetricsRollupInput): DailyMetrics {
@@ -165,6 +287,11 @@ export function buildDailyMetricsRollup(input: DailyMetricsRollupInput): DailyMe
     heartRateMinBpm: optionalNumber(input.heartRateMinBpm),
     heartRateMaxBpm: optionalNumber(input.heartRateMaxBpm),
     hrvLastNightAvg: optionalNumber(input.hrvLastNightAvg),
+    hrvMethod: input.hrvMethod,
+    hrvCanonicalType: input.hrvCanonicalType,
+    hrvSourceApp: input.hrvSourceApp,
+    hrvSourceKey: input.hrvSourceKey,
+    hrvSampleCount: optionalNumber(input.hrvSampleCount),
     workoutCount: input.workout.workoutCount,
     runWorkoutCount: input.workout.runWorkoutCount,
     rideWorkoutCount: input.workout.rideWorkoutCount,
@@ -220,6 +347,7 @@ export function normalizeLegacyHealthSampleRow(
     localDate: localDateKey(row.start_time),
     value: row.value,
     unit: row.unit,
+    hrvMethod: hrvMethodForCanonicalType(row.metric as CanonicalType) ?? null,
     metadataJson: row.raw_json,
     importedAt: row.synced_at,
   };

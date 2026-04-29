@@ -10,6 +10,7 @@ export type CanonicalType =
   | 'heart_rate'
   | 'resting_heart_rate'
   | 'hrv_rmssd'
+  | 'hrv_sdnn'
   | 'sleep_session'
   | 'workout'
   | 'weight'
@@ -20,6 +21,16 @@ export type CanonicalType =
   | 'vo2max';
 
 export type HealthMetric = CanonicalType;
+
+export type HrvCanonicalType = Extract<CanonicalType, 'hrv_rmssd' | 'hrv_sdnn'>;
+
+export type HrvMethod = 'rmssd' | 'sdnn';
+
+export type HrvBaselineStatus =
+  | 'compatible'
+  | 'missing_current'
+  | 'insufficient_baseline'
+  | 'method_incompatible';
 
 export type SportBucket = 'run' | 'ride' | 'strength' | 'swim' | 'walk' | 'other';
 
@@ -63,6 +74,7 @@ export type HealthSample = {
   timezone?: string;
   value?: number;
   unit?: string;
+  hrvMethod?: HrvMethod;
   metadataJson: string;
   sourceModifiedAt?: string;
 };
@@ -200,6 +212,11 @@ export type DailyMetrics = {
   heartRateMinBpm?: number;
   heartRateMaxBpm?: number;
   hrvLastNightAvg?: number;
+  hrvMethod?: HrvMethod;
+  hrvCanonicalType?: HrvCanonicalType;
+  hrvSourceApp?: string;
+  hrvSourceKey?: string;
+  hrvSampleCount?: number;
   workoutCount?: number;
   runWorkoutCount?: number;
   rideWorkoutCount?: number;

@@ -23,6 +23,7 @@ import type {
   CanonicalType,
   HealthConnectReadDiagnostic,
   HealthSample,
+  HrvMethod,
   NutritionDailyRecord,
   SleepSessionRecord,
   SportBucket,
@@ -97,6 +98,28 @@ type RecordMetadata = {
     type?: number;
   };
 };
+
+function hrvMethodForCanonicalType(canonicalType: CanonicalType): HrvMethod | undefined {
+  if (canonicalType === 'hrv_rmssd') return 'rmssd';
+  if (canonicalType === 'hrv_sdnn') return 'sdnn';
+  return undefined;
+}
+
+function healthConnectMetadataJson(
+  record: unknown,
+  extra?: Record<string, unknown>,
+): string {
+  if (!extra) {
+    return safeJsonStringify(record);
+  }
+
+  return safeJsonStringify({
+    ...(typeof record === 'object' && record !== null && !Array.isArray(record)
+      ? record
+      : { raw: record }),
+    healthConnect: extra,
+  });
+}
 
 type TimedRecord = {
   metadata?: RecordMetadata;
@@ -279,6 +302,7 @@ function healthSample({
   const timed = record as TimedRecord;
   const resolvedStart = startAt ?? recordStart(timed);
   const resolvedEnd = endAt ?? recordEnd(timed);
+  const hrvMethod = hrvMethodForCanonicalType(canonicalType);
 
   return {
     sampleId: `health_connect:${recordType}:${metadata?.id ?? index}:${resolvedStart}`,
@@ -292,7 +316,17 @@ function healthSample({
     localDate: localDateKey(resolvedStart),
     value,
     unit,
-    metadataJson: safeJsonStringify(record),
+    hrvMethod,
+    metadataJson: healthConnectMetadataJson(
+      record,
+      hrvMethod
+        ? {
+            hrvMethod,
+            hrvMethodLabel: hrvMethod.toUpperCase(),
+            hrvMethodSource: `Health Connect ${recordType}Record`,
+          }
+        : undefined,
+    ),
     sourceModifiedAt: metadata?.lastModifiedTime,
   };
 }
