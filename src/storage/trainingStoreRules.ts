@@ -1,5 +1,5 @@
 import { localDateKey } from '../lib/dates';
-import type { CanonicalType, DailyMetrics, HealthProvider } from '../health/types';
+import type { CanonicalType, DailyMetrics, HealthProvider, HrvMethod } from '../health/types';
 
 export type DailyWorkoutRollup = {
   workoutCount: number;
@@ -42,6 +42,8 @@ export type DailyMetricsRollupInput = {
   heartRateMinBpm?: number;
   heartRateMaxBpm?: number;
   hrvLastNightAvg?: number;
+  hrvMethod?: HrvMethod;
+  hrvSourceApp?: string;
   workout: DailyWorkoutRollup;
   nutrition?: DailyNutritionRollup | null;
   weightKg?: number;
@@ -146,6 +148,8 @@ export function buildDailyMetricsRollup(input: DailyMetricsRollupInput): DailyMe
     heartRateMinBpm: optionalNumber(input.heartRateMinBpm),
     heartRateMaxBpm: optionalNumber(input.heartRateMaxBpm),
     hrvLastNightAvg: optionalNumber(input.hrvLastNightAvg),
+    hrvMethod: input.hrvMethod,
+    hrvSourceApp: input.hrvSourceApp,
     workoutCount: input.workout.workoutCount,
     runWorkoutCount: input.workout.runWorkoutCount,
     rideWorkoutCount: input.workout.rideWorkoutCount,
@@ -184,5 +188,38 @@ export function normalizeLegacyHealthSampleRow(
     unit: row.unit,
     metadataJson: row.raw_json,
     importedAt: row.synced_at,
+  };
+}
+
+function average(values: number[]): number | undefined {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : undefined;
+}
+
+export function deriveCompatibleHrvBaseline(
+  current: Pick<DailyMetrics, 'date' | 'hrvLastNightAvg' | 'hrvMethod' | 'hrvSourceApp'>,
+  history: Pick<DailyMetrics, 'date' | 'hrvLastNightAvg' | 'hrvMethod' | 'hrvSourceApp'>[],
+) {
+  const candidates = history
+    .filter((row) => row.date !== current.date && row.hrvLastNightAvg != null)
+    .slice(0, 14);
+
+  if (current.hrvLastNightAvg == null || !current.hrvMethod) {
+    return {
+      baseline: undefined,
+      compatibleCount: 0,
+      incompatibleCount: candidates.length,
+    };
+  }
+
+  const compatible = candidates.filter(
+    (row) =>
+      row.hrvMethod === current.hrvMethod &&
+      (row.hrvSourceApp ?? null) === (current.hrvSourceApp ?? null),
+  );
+
+  return {
+    baseline: average(compatible.map((row) => row.hrvLastNightAvg as number)),
+    compatibleCount: compatible.length,
+    incompatibleCount: candidates.length - compatible.length,
   };
 }

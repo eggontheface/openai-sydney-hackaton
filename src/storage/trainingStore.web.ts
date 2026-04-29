@@ -94,6 +94,8 @@ function day(offset = 0): DailyMetrics {
     heartRateMinBpm: 45,
     heartRateMaxBpm: 161,
     hrvLastNightAvg: offset === 0 ? 62 : 56 + Math.abs(offset),
+    hrvMethod: 'RMSSD',
+    hrvSourceApp: 'com.google.android.apps.healthdata',
     workoutCount: offset === -1 || offset === -3 ? 1 : 0,
     runWorkoutCount: offset === -1 ? 1 : 0,
     rideWorkoutCount: 0,
@@ -179,7 +181,7 @@ const demoSourceFreshness: SourceFreshness[] = [
     latestLocalDate: latestDate,
     lastUpdatedAt: `${latestDate}T06:45:00.000Z`,
     ageDays: 0,
-    limitations: [],
+    limitations: ['Health Connect HRV uses RMSSD; it is not compared with Apple Health SDNN.'],
   },
   {
     domain: 'workouts',

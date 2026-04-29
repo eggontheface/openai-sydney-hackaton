@@ -5,6 +5,7 @@ const path = require('node:path');
 const fixtures = require('./fixtures/training-rollup.fixtures.json');
 const {
   buildDailyMetricsRollup,
+  deriveCompatibleHrvBaseline,
   normalizeLegacyHealthSampleRow,
 } = require(path.join(process.cwd(), '.tmp/test-build/src/storage/trainingStoreRules.js'));
 
@@ -153,4 +154,62 @@ test('normalizes supported legacy sample rows before migration insert', () => {
   assert.equal(sample.sourceApp, 'Apple Health');
   assert.equal(sample.sourceDevice, 'iphone');
   assert.equal(sample.metadataJson, '{"legacy":true}');
+});
+
+test('derives HRV baselines only from matching source and method', () => {
+  const current = {
+    date: '2026-04-29',
+    hrvLastNightAvg: 74,
+    hrvMethod: 'SDNN',
+    hrvSourceApp: 'com.apple.Health',
+  };
+  const history = [
+    {
+      date: '2026-04-28',
+      hrvLastNightAvg: 70,
+      hrvMethod: 'SDNN',
+      hrvSourceApp: 'com.apple.Health',
+    },
+    {
+      date: '2026-04-27',
+      hrvLastNightAvg: 72,
+      hrvMethod: 'SDNN',
+      hrvSourceApp: 'com.apple.Health',
+    },
+    {
+      date: '2026-04-26',
+      hrvLastNightAvg: 54,
+      hrvMethod: 'RMSSD',
+      hrvSourceApp: 'com.google.android.apps.healthdata',
+    },
+  ];
+
+  const baseline = deriveCompatibleHrvBaseline(current, history);
+
+  assert.equal(baseline.baseline, 71);
+  assert.equal(baseline.compatibleCount, 2);
+  assert.equal(baseline.incompatibleCount, 1);
+});
+
+test('reports incompatible HRV history instead of mixing methods', () => {
+  const baseline = deriveCompatibleHrvBaseline(
+    {
+      date: '2026-04-29',
+      hrvLastNightAvg: 74,
+      hrvMethod: 'SDNN',
+      hrvSourceApp: 'com.apple.Health',
+    },
+    [
+      {
+        date: '2026-04-28',
+        hrvLastNightAvg: 54,
+        hrvMethod: 'RMSSD',
+        hrvSourceApp: 'com.google.android.apps.healthdata',
+      },
+    ],
+  );
+
+  assert.equal(baseline.baseline, undefined);
+  assert.equal(baseline.compatibleCount, 0);
+  assert.equal(baseline.incompatibleCount, 1);
 });

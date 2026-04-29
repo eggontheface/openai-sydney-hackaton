@@ -37,6 +37,8 @@ export type SourceFreshnessDomain =
   | 'body_composition'
   | 'check_ins';
 
+export type HrvMethod = 'RMSSD' | 'SDNN';
+
 export type SourceFreshness = {
   domain: SourceFreshnessDomain;
   label: string;
@@ -184,6 +186,8 @@ export type DailyMetrics = {
   heartRateMinBpm?: number;
   heartRateMaxBpm?: number;
   hrvLastNightAvg?: number;
+  hrvMethod?: HrvMethod;
+  hrvSourceApp?: string;
   workoutCount?: number;
   runWorkoutCount?: number;
   rideWorkoutCount?: number;

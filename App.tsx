@@ -554,7 +554,9 @@ function CoachScreen({
   const accent = toneColor(recommendation.color);
   const plan = useMemo(() => generateTrainingPlan(snapshot, 'run'), [snapshot]);
   const sleep = current?.sleepSeconds ? formatDuration(current.sleepSeconds) : '—';
-  const hrv = current?.hrvLastNightAvg ? `${Math.round(current.hrvLastNightAvg)} ms` : '—';
+  const hrv = current?.hrvLastNightAvg
+    ? `${Math.round(current.hrvLastNightAvg)} ${current.hrvMethod ?? 'ms'}`
+    : '—';
   const rhr = current?.restingHr ? `${Math.round(current.restingHr)} bpm` : '—';
   const quickReplies = ['Make it easier', 'Move it to tomorrow', "I'm short on time"];
   const canSendCoachMessage = hasOpenAiApiKey && !coachBusy && Boolean(coachDraft.trim());
@@ -620,7 +622,7 @@ function CoachScreen({
           <View style={styles.metricGridFull}>
             <SmallMetric label="Sleep" value={sleep} />
             <SmallMetric label="Score" value={formatNumber(recommendation.readiness ?? undefined)} />
-            <SmallMetric label="HRV" value={hrv.replace(' ms', '')} />
+            <SmallMetric label="HRV" value={hrv} />
             <SmallMetric label="RHR" value={rhr.replace(' bpm', '')} />
           </View>
           <Text style={styles.helpText}>{recommendation.reason}</Text>

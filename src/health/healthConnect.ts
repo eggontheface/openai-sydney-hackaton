@@ -177,6 +177,7 @@ function healthSample({
   startAt,
   endAt,
   metadata,
+  extraMetadata,
 }: {
   recordType: RecordType | string;
   canonicalType: CanonicalType;
@@ -187,10 +188,17 @@ function healthSample({
   startAt?: string;
   endAt?: string;
   metadata?: RecordMetadata;
+  extraMetadata?: Record<string, unknown>;
 }): HealthSample {
   const timed = record as TimedRecord;
   const resolvedStart = startAt ?? recordStart(timed);
   const resolvedEnd = endAt ?? recordEnd(timed);
+  const metadataJson = extraMetadata
+    ? safeJsonStringify({
+        ...(typeof record === 'object' && record !== null ? record : { raw: record }),
+        healthConnect: extraMetadata,
+      })
+    : safeJsonStringify(record);
 
   return {
     sampleId: `health_connect:${recordType}:${metadata?.id ?? index}:${resolvedStart}`,
@@ -204,7 +212,7 @@ function healthSample({
     localDate: localDateKey(resolvedStart),
     value,
     unit,
-    metadataJson: safeJsonStringify(record),
+    metadataJson,
     sourceModifiedAt: metadata?.lastModifiedTime,
   };
 }
@@ -913,6 +921,10 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
               value: Number(anyRecord.heartRateVariabilityMillis),
               unit: 'ms',
               metadata,
+              extraMetadata: {
+                hrvMethod: 'RMSSD',
+                hrvMethodSource: 'Health Connect HeartRateVariabilityRmssd',
+              },
             }),
           );
           return;

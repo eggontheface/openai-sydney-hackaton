@@ -6,6 +6,7 @@ import { formatDuration, localDateKey } from '../lib/dates';
 import { safeJsonStringify } from '../lib/json';
 import {
   buildDailyMetricsRollup,
+  deriveCompatibleHrvBaseline,
   normalizeLegacyHealthSampleRow,
   type LegacyHealthSampleRow,
 } from './trainingStoreRules';
@@ -16,6 +17,7 @@ import type {
   HealthConnectReadDiagnostic,
   HealthProvider,
   HealthSample,
+  HrvMethod,
   MetricAvailability,
   NutritionDailyRecord,
   PipelineSnapshot,
@@ -155,6 +157,15 @@ type SourceValueRow = {
   source_is_combined: number;
 };
 
+type HrvValueRow = {
+  canonical_type: Extract<CanonicalType, 'hrv_rmssd' | 'hrv_sdnn'>;
+  source_app: string | null;
+  value: number | null;
+  sample_count: number;
+  latest_end_at: string | null;
+  source_days: number | null;
+};
+
 type SleepRollupRow = {
   source_key: string | null;
   sleep_seconds: number | null;
@@ -188,6 +199,8 @@ type DailyMetricsRow = {
   heart_rate_min_bpm: number | null;
   heart_rate_max_bpm: number | null;
   hrv_last_night_avg: number | null;
+  hrv_method: HrvMethod | null;
+  hrv_source_app: string | null;
   workout_count: number | null;
   run_workout_count: number | null;
   ride_workout_count: number | null;
@@ -719,6 +732,36 @@ async function presentCanonicalTypesFor(
   return new Set(rows.filter((row) => Number(row.sample_count) > 0).map((row) => row.canonical_type));
 }
 
+async function hrvMethodLimitations(db: SQLite.SQLiteDatabase): Promise<string[]> {
+  const rows = await db.getAllAsync<{ canonical_type: CanonicalType }>(`
+    SELECT DISTINCT canonical_type
+    FROM health_samples
+    WHERE canonical_type IN ('hrv_rmssd', 'hrv_sdnn')
+  `);
+  const methods = new Set<HrvMethod>();
+  rows.forEach((row) => {
+    if (row.canonical_type === 'hrv_sdnn') {
+      methods.add('SDNN');
+    } else if (row.canonical_type === 'hrv_rmssd') {
+      methods.add('RMSSD');
+    }
+  });
+
+  if (methods.size > 1) {
+    return ['HRV contains both RMSSD and SDNN; readiness keeps baselines separate by source and method.'];
+  }
+
+  if (methods.has('SDNN')) {
+    return ['Apple Health HRV uses SDNN; it is not compared with Health Connect RMSSD.'];
+  }
+
+  if (methods.has('RMSSD')) {
+    return ['Health Connect HRV uses RMSSD; it is not compared with Apple Health SDNN.'];
+  }
+
+  return [];
+}
+
 function buildFreshnessLimitations({
   config,
   diagnostics,
@@ -826,6 +869,9 @@ async function getSourceFreshness(db: SQLite.SQLiteDatabase): Promise<SourceFres
       today,
       latestDate,
     });
+    if (config.domain === 'hrv' && sampleCount > 0) {
+      limitations.push(...(await hrvMethodLimitations(db)));
+    }
 
     let state: SourceFreshness['state'] = 'fresh';
     if (!sampleCount) {
@@ -877,6 +923,8 @@ function toDailyMetrics(row: DailyMetricsRow): DailyMetrics {
     heartRateMinBpm: optionalNumber(row.heart_rate_min_bpm),
     heartRateMaxBpm: optionalNumber(row.heart_rate_max_bpm),
     hrvLastNightAvg: optionalNumber(row.hrv_last_night_avg),
+    hrvMethod: row.hrv_method ?? undefined,
+    hrvSourceApp: row.hrv_source_app ?? undefined,
     workoutCount: optionalNumber(row.workout_count),
     runWorkoutCount: optionalNumber(row.run_workout_count),
     rideWorkoutCount: optionalNumber(row.ride_workout_count),
@@ -1040,6 +1088,8 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       heart_rate_min_bpm REAL,
       heart_rate_max_bpm REAL,
       hrv_last_night_avg REAL,
+      hrv_method TEXT,
+      hrv_source_app TEXT,
       workout_count INTEGER,
       run_workout_count INTEGER,
       ride_workout_count INTEGER,
@@ -1088,6 +1138,9 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       ON health_connect_diagnostics(sync_started_at);
   `);
 
+  await ensureColumn(db, 'daily_metrics', 'hrv_method', 'TEXT');
+  await ensureColumn(db, 'daily_metrics', 'hrv_source_app', 'TEXT');
+
   const legacyColumns = await db.getAllAsync<{ name: string }>(
     'PRAGMA table_info(health_samples_legacy)',
   );
@@ -1127,6 +1180,20 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
 
     await db.execAsync('DROP TABLE health_samples_legacy;');
   }
+}
+
+async function ensureColumn(
+  db: SQLite.SQLiteDatabase,
+  table: string,
+  column: string,
+  definition: string,
+): Promise<void> {
+  const columns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+  if (columns.some((item) => item.name === column)) {
+    return;
+  }
+
+  await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
 }
 
 export async function initTrainingStore(): Promise<void> {
@@ -1515,6 +1582,73 @@ async function latestValueFor(
   return optionalNumber(row?.value);
 }
 
+function hrvMethodForCanonical(
+  canonicalType: Extract<CanonicalType, 'hrv_rmssd' | 'hrv_sdnn'>,
+): HrvMethod {
+  return canonicalType === 'hrv_sdnn' ? 'SDNN' : 'RMSSD';
+}
+
+async function selectedHrvFor(
+  db: SQLite.SQLiteDatabase,
+  date: string,
+): Promise<{ value?: number; method?: HrvMethod; sourceApp?: string }> {
+  const row = await db.getFirstAsync<HrvValueRow>(
+    `
+      WITH day_source AS (
+        SELECT
+          canonical_type,
+          COALESCE(source_app, platform) AS source_app,
+          AVG(value) AS value,
+          COUNT(*) AS sample_count,
+          MAX(end_at) AS latest_end_at
+        FROM health_samples
+        WHERE local_date = ?
+          AND canonical_type IN ('hrv_rmssd', 'hrv_sdnn')
+          AND value IS NOT NULL
+        GROUP BY canonical_type, COALESCE(source_app, platform)
+      ),
+      source_rank AS (
+        SELECT
+          canonical_type,
+          COALESCE(source_app, platform) AS source_app,
+          COUNT(DISTINCT local_date) AS source_days
+        FROM health_samples
+        WHERE canonical_type IN ('hrv_rmssd', 'hrv_sdnn')
+          AND value IS NOT NULL
+        GROUP BY canonical_type, COALESCE(source_app, platform)
+      )
+      SELECT
+        day_source.canonical_type,
+        day_source.source_app,
+        day_source.value,
+        day_source.sample_count,
+        day_source.latest_end_at,
+        source_rank.source_days
+      FROM day_source
+      LEFT JOIN source_rank
+        ON source_rank.canonical_type = day_source.canonical_type
+        AND (
+          source_rank.source_app = day_source.source_app
+          OR (source_rank.source_app IS NULL AND day_source.source_app IS NULL)
+        )
+      ORDER BY
+        source_rank.source_days DESC,
+        day_source.sample_count DESC,
+        day_source.latest_end_at DESC,
+        day_source.canonical_type ASC,
+        day_source.source_app ASC
+      LIMIT 1
+    `,
+    date,
+  );
+
+  return {
+    value: optionalNumber(row?.value),
+    method: row ? hrvMethodForCanonical(row.canonical_type) : undefined,
+    sourceApp: row?.source_app ?? undefined,
+  };
+}
+
 async function rebuildDailyMetrics(): Promise<void> {
   const db = await getDb();
   const dates = await distinctMetricDates(db);
@@ -1532,7 +1666,7 @@ async function rebuildDailyMetrics(): Promise<void> {
     const heartRateMin = await valueFor(db, date, 'heart_rate', 'MIN');
     const heartRateMax = await valueFor(db, date, 'heart_rate', 'MAX');
     const restingHr = await valueFor(db, date, 'resting_heart_rate', 'AVG');
-    const hrv = await valueFor(db, date, 'hrv_rmssd', 'AVG');
+    const hrv = await selectedHrvFor(db, date);
     const sleepFallback = await singleSourceSumFor(db, date, 'sleep_session');
     const weightKg = await latestValueFor(db, date, 'weight');
     const bodyFatPct = await latestValueFor(db, date, 'body_fat');
@@ -1588,7 +1722,9 @@ async function rebuildDailyMetrics(): Promise<void> {
       heartRateAvgBpm: heartRateAvg,
       heartRateMinBpm: heartRateMin,
       heartRateMaxBpm: heartRateMax,
-      hrvLastNightAvg: hrv,
+      hrvLastNightAvg: hrv.value,
+      hrvMethod: hrv.method,
+      hrvSourceApp: hrv.sourceApp,
       workout: {
         workoutCount: workout.workout_count,
         runWorkoutCount: workout.run_workout_count,
@@ -1622,13 +1758,13 @@ async function rebuildDailyMetrics(): Promise<void> {
           has_steps, has_energy, steps, active_kcal, total_kcal, distance_km,
           sleep_seconds, time_in_bed_seconds, sleep_efficiency, resting_hr,
           heart_rate_avg_bpm, heart_rate_min_bpm, heart_rate_max_bpm,
-          hrv_last_night_avg, workout_count, run_workout_count,
+          hrv_last_night_avg, hrv_method, hrv_source_app, workout_count, run_workout_count,
           ride_workout_count, strength_workout_count, activity_elapsed_seconds,
           activity_kcal, kcal_in, protein_g, carbs_g, fat_g, fiber_g, sugar_g,
           water_ml, weight_kg, body_fat_pct, lean_body_mass_kg, vo2max,
           generated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       daily.date,
       daily.dataCompleteness,
@@ -1652,6 +1788,8 @@ async function rebuildDailyMetrics(): Promise<void> {
       daily.heartRateMinBpm ?? null,
       daily.heartRateMaxBpm ?? null,
       daily.hrvLastNightAvg ?? null,
+      daily.hrvMethod ?? null,
+      daily.hrvSourceApp ?? null,
       daily.workoutCount ?? null,
       daily.runWorkoutCount ?? null,
       daily.rideWorkoutCount ?? null,
@@ -1734,12 +1872,12 @@ function deriveRecommendation(
 
   const baselineRows = history.filter((row) => row.date !== current.date).slice(0, 14);
   const sleepHours = (current.sleepSeconds ?? 0) / 3600;
-  const hrvBaseline = average(baselineRows.map((row) => row.hrvLastNightAvg));
+  const hrvBaseline = deriveCompatibleHrvBaseline(current, baselineRows);
   const rhrBaseline = average(baselineRows.map((row) => row.restingHr));
   const sleepBaseline = average(baselineRows.map((row) => row.sleepSeconds));
   const hrvDelta =
-    current.hrvLastNightAvg != null && hrvBaseline
-      ? current.hrvLastNightAvg - hrvBaseline
+    current.hrvLastNightAvg != null && hrvBaseline.baseline
+      ? current.hrvLastNightAvg - hrvBaseline.baseline
       : undefined;
   const rhrDelta =
     current.restingHr != null && rhrBaseline ? current.restingHr - rhrBaseline : undefined;
@@ -1766,11 +1904,22 @@ function deriveRecommendation(
   if (hrvDelta != null) {
     if (hrvDelta > 8) {
       readiness += 16;
-      signals.push(`HRV is up ${Math.round(hrvDelta)} ms`);
+      signals.push(`${current.hrvMethod ?? 'HRV'} HRV is up ${Math.round(hrvDelta)} ms`);
     } else if (hrvDelta < -8) {
       readiness -= 22;
-      signals.push(`HRV is down ${Math.abs(Math.round(hrvDelta))} ms`);
+      signals.push(
+        `${current.hrvMethod ?? 'HRV'} HRV is down ${Math.abs(Math.round(hrvDelta))} ms`,
+      );
     }
+  } else if (
+    current.hrvLastNightAvg != null &&
+    current.hrvMethod &&
+    hrvBaseline.compatibleCount === 0 &&
+    hrvBaseline.incompatibleCount > 0
+  ) {
+    signals.push(
+      `HRV baseline is method-specific; ${current.hrvMethod} is not compared with incompatible HRV history`,
+    );
   }
 
   if (rhrDelta != null) {
