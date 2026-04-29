@@ -2,7 +2,7 @@ import { Platform, StatusBar as NativeStatusBar, StyleSheet } from 'react-native
 
 import { tokens } from '../theme/tokens';
 
-const androidStatusBarInset = Platform.OS === 'android' ? NativeStatusBar.currentHeight ?? 0 : 0;
+const androidStatusBarInset = Platform.OS === 'android' ? (NativeStatusBar.currentHeight ?? 0) : 0;
 
 export const styles = StyleSheet.create({
   safeArea: {
@@ -17,6 +17,106 @@ export const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: tokens.bg,
+  },
+  splashScreen: {
+    backgroundColor: tokens.bg,
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 22,
+  },
+  splashHeader: {
+    alignItems: 'flex-start',
+    gap: 10,
+    marginBottom: 28,
+  },
+  splashTitle: {
+    color: tokens.ink,
+    fontFamily: tokens.serif,
+    fontSize: 42,
+    fontWeight: '400',
+    letterSpacing: 0,
+    lineHeight: 47,
+  },
+  splashCopy: {
+    color: tokens.muted,
+    fontSize: 15,
+    letterSpacing: 0,
+    lineHeight: 22,
+  },
+  splashActions: {
+    gap: 12,
+  },
+  splashOption: {
+    alignItems: 'center',
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 88,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  splashOptionPrimary: {
+    backgroundColor: tokens.ink,
+    borderColor: tokens.ink,
+  },
+  splashOptionIcon: {
+    alignItems: 'center',
+    backgroundColor: tokens.surfaceAlt,
+    borderRadius: 8,
+    height: 42,
+    justifyContent: 'center',
+    width: 42,
+  },
+  splashOptionIconPrimary: {
+    backgroundColor: tokens.inkSoft,
+  },
+  splashOptionCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  splashOptionTitle: {
+    color: tokens.ink,
+    fontSize: 15,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  splashOptionTitlePrimary: {
+    color: tokens.surface,
+  },
+  splashOptionText: {
+    color: tokens.muted,
+    fontSize: 13,
+    letterSpacing: 0,
+    lineHeight: 18,
+  },
+  splashOptionTextPrimary: {
+    color: tokens.bgDeep,
+  },
+  startLoadingContent: {
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  startLoadingTitle: {
+    color: tokens.ink,
+    fontFamily: tokens.serif,
+    fontSize: 32,
+    fontWeight: '400',
+    letterSpacing: 0,
+    lineHeight: 36,
+  },
+  startLoadingText: {
+    color: tokens.muted,
+    fontSize: 14,
+    letterSpacing: 0,
+    lineHeight: 20,
+    maxWidth: 280,
+    textAlign: 'center',
   },
   onboardingProgress: {
     backgroundColor: tokens.bgDeep,
@@ -153,16 +253,23 @@ export const styles = StyleSheet.create({
     flexShrink: 0,
     width: 32,
   },
+  coachBubble: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.lineSoft,
+    borderRadius: 18,
+    borderWidth: 1,
+    flexShrink: 1,
+    maxWidth: '100%',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
   coachText: {
     color: tokens.ink,
     flexShrink: 1,
-    fontFamily: tokens.serif,
-    fontSize: 18,
-    fontWeight: '400',
+    fontSize: 14,
+    fontWeight: '700',
     letterSpacing: 0,
-    lineHeight: 25,
-    paddingHorizontal: 2,
-    paddingVertical: 3,
+    lineHeight: 20,
   },
   userBubble: {
     alignSelf: 'flex-end',

@@ -152,7 +152,9 @@ export function CoachLine({ children, first }: { children: string; first?: boole
   return (
     <View style={[styles.coachLine, first && styles.coachLineFirst]}>
       {first ? <CoachAvatar size={32} /> : <View style={styles.coachSpacer} />}
-      <Text style={styles.coachText}>{children}</Text>
+      <View style={styles.coachBubble}>
+        <Text style={styles.coachText}>{children}</Text>
+      </View>
     </View>
   );
 }

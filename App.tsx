@@ -1,5 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Keyboard, KeyboardAvoidingView, Platform, SafeAreaView } from 'react-native';
 
 import { openAiCoachModel, sendCoachMessage } from './src/ai/openaiCoach';
@@ -11,6 +11,7 @@ import { CoachOnboardingScreen } from './src/screens/CoachOnboardingScreen';
 import { CoachScreen } from './src/screens/CoachScreen';
 import { HistoryScreen } from './src/screens/HistoryScreen';
 import { SourceScreen } from './src/screens/SourceScreen';
+import { SplashScreen, StartLoadingScreen } from './src/screens/SplashScreen';
 import { WorkoutPlanScreen } from './src/screens/WorkoutPlanScreen';
 import { currentHealthProviderId, currentHealthProviderLabel, syncCurrentPlatform } from './src/health/syncPipeline';
 import type { PipelineSnapshot, SyncRange } from './src/health/types';
@@ -39,11 +40,11 @@ import { styles } from './src/styles/appStyles';
 import { TabBar } from './src/ui/TabBar';
 
 export default function App() {
+  const [entryMode, setEntryMode] = useState<'splash' | 'onboarding' | 'loading-start' | 'app'>('splash');
   const [activeTab, setActiveTab] = useState<Tab>('coach');
   const [rangeDays, setRangeDays] = useState(baselineRangeDays);
   const [snapshot, setSnapshot] = useState<PipelineSnapshot>(emptySnapshot);
   const [goalText, setGoalText] = useState('');
-  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
   const [lastSync, setLastSync] = useState<LastSync>(null);
   const [lastSuccessfulSync, setLastSuccessfulSync] = useState<LastSync>(null);
   const [recentSyncRuns, setRecentSyncRuns] = useState<SyncRuns>([]);
@@ -58,9 +59,12 @@ export default function App() {
   const [status, setStatus] = useState('Ready');
   const [warnings, setWarnings] = useState<string[]>([]);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [storeReady, setStoreReady] = useState(false);
+  const bootstrapPromiseRef = useRef<Promise<void> | null>(null);
 
   const range = useMemo(() => makeSyncRange(rangeDays), [rangeDays]);
   const canSync = Platform.OS === 'ios' || Platform.OS === 'android';
+  const sourceLabel = canSync ? currentHealthProviderLabel() : 'Apple Health / Health Connect';
 
   async function refreshStore() {
     const [nextSnapshot, nextLastSync, nextLastSuccessfulSync, nextRecentSyncRuns] = await Promise.all([
@@ -76,15 +80,25 @@ export default function App() {
   }
 
   useEffect(() => {
-    void initTrainingStore()
+    const bootstrap = initTrainingStore()
       .then(async () => {
         const nextSettings = await loadAppSettings();
         setAppSettings(nextSettings);
         setRangeDays(nextSettings.defaultSyncRangeDays);
         await refreshStore();
       })
-      .catch((error) => setStatus(String(error instanceof Error ? error.message : error)));
+      .catch((error) => setStatus(String(error instanceof Error ? error.message : error)))
+      .finally(() => setStoreReady(true));
+
+    bootstrapPromiseRef.current = bootstrap;
+    void bootstrap;
   }, []);
+
+  async function ensureStoreReady() {
+    if (bootstrapPromiseRef.current) {
+      await bootstrapPromiseRef.current;
+    }
+  }
 
   useEffect(() => {
     const showSubscription = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
@@ -252,6 +266,8 @@ export default function App() {
   }
 
   async function runSync(syncType: 'manual' | 'incremental' = 'manual') {
+    await ensureStoreReady();
+
     if (!canSync) {
       setStatus('Use an iOS or Android dev build.');
       return;
@@ -297,6 +313,16 @@ export default function App() {
     }
   }
 
+  async function syncDataAndStart() {
+    setActiveTab('coach');
+    setEntryMode('loading-start');
+    setStatus(canSync ? `Loading data from ${sourceLabel}` : 'Opening local health store');
+
+    await ensureStoreReady();
+    await runSync();
+    setEntryMode('app');
+  }
+
   async function runExport() {
     setBusy(true);
     try {
@@ -332,22 +358,34 @@ export default function App() {
         keyboardVerticalOffset={0}
         style={styles.appShell}
       >
-        {!hasCompletedOnboarding ? (
+        {entryMode === 'splash' ? (
+          <SplashScreen
+            busy={!storeReady}
+            onStartOnboarding={() => setEntryMode('onboarding')}
+            onSyncAndStart={() => void syncDataAndStart()}
+            sourceLabel={sourceLabel}
+            status={storeReady ? status : 'Opening local health store'}
+          />
+        ) : null}
+        {entryMode === 'onboarding' ? (
           <CoachOnboardingScreen
             busy={busy}
             canSync={canSync}
             onComplete={(nextGoal) => {
               setGoalText(nextGoal);
-              setHasCompletedOnboarding(true);
+              setEntryMode('app');
               setActiveTab('coach');
             }}
             onSync={runSync}
-            sourceLabel={canSync ? currentHealthProviderLabel() : 'Apple Health / Health Connect'}
+            sourceLabel={sourceLabel}
             status={status}
             snapshot={snapshot}
           />
         ) : null}
-        {hasCompletedOnboarding && activeTab === 'coach' ? (
+        {entryMode === 'loading-start' ? (
+          <StartLoadingScreen sourceLabel={sourceLabel} status={status} />
+        ) : null}
+        {entryMode === 'app' && activeTab === 'coach' ? (
           <CoachScreen
             busy={busy}
             coachBusy={coachBusy}
@@ -365,13 +403,13 @@ export default function App() {
             warnings={warnings}
           />
         ) : null}
-        {hasCompletedOnboarding && activeTab === 'workout' ? (
+        {entryMode === 'app' && activeTab === 'workout' ? (
           <WorkoutPlanScreen goalText={goalText} snapshot={snapshot} />
         ) : null}
-        {hasCompletedOnboarding && activeTab === 'history' ? (
+        {entryMode === 'app' && activeTab === 'history' ? (
           <HistoryScreen goalText={goalText} snapshot={snapshot} />
         ) : null}
-        {hasCompletedOnboarding && activeTab === 'you' ? (
+        {entryMode === 'app' && activeTab === 'you' ? (
           <SourceScreen
             apiKeyDraft={apiKeyDraft}
             appSettings={appSettings}
@@ -394,11 +432,8 @@ export default function App() {
             status={status}
           />
         ) : null}
-        {hasCompletedOnboarding && !keyboardVisible ? (
-          <TabBar
-            active={activeTab}
-            onChange={setActiveTab}
-          />
+        {!keyboardVisible && entryMode === 'app' ? (
+          <TabBar active={activeTab} onChange={setActiveTab} />
         ) : null}
       </KeyboardAvoidingView>
     </SafeAreaView>
