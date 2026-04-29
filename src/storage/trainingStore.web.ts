@@ -102,6 +102,7 @@ export type SyncRunDetails = {
 export type PipelineExportResult = {
   jsonFileUri: string;
   healthCheckFileUri: string;
+  llmBundleFileUri: string;
 };
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -203,6 +204,7 @@ function daysSinceLocalDate(localDate: string | undefined): number | undefined {
 
 function checkInSourceFreshness(checkIns: DailyCheckIn[]): SourceFreshness {
   const latest = checkIns[0];
+  const earliest = checkIns[checkIns.length - 1];
   const latestLocalDate = latest?.localDate;
   const ageDays = daysSinceLocalDate(latestLocalDate);
 
@@ -217,6 +219,7 @@ function checkInSourceFreshness(checkIns: DailyCheckIn[]): SourceFreshness {
     canonicalTypes: [],
     sampleCount: checkIns.length,
     dayCount: new Set(checkIns.map((checkIn) => checkIn.localDate)).size,
+    earliestLocalDate: earliest?.localDate,
     latestLocalDate,
     lastUpdatedAt: latest?.updatedAt,
     ageDays,
@@ -881,6 +884,7 @@ export async function exportPipelineArtifacts(): Promise<PipelineExportResult> {
   return {
     jsonFileUri: `web-demo://${artifacts.jsonFileName}`,
     healthCheckFileUri: `web-demo://${artifacts.healthCheckFileName}`,
+    llmBundleFileUri: `web-demo://${artifacts.llmBundleFileName}`,
   };
 }
 

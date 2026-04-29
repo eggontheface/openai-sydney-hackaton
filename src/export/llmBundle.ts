@@ -4,10 +4,30 @@ import { toTrainingLoadExport } from "../coach/trainingLoad";
 import type { GoalProfile } from "../goals/goalProfile";
 import type {
   CoachRecommendation,
+  DailyCheckIn,
   DailyMetrics,
   PipelineSnapshot,
   SourceFreshness,
 } from "../health/types";
+
+type LlmBundleCheckInValue = string | number | boolean | string[] | null;
+
+export type LlmBundleCheckIn = Partial<
+  Record<
+    | "localDate"
+    | "energy"
+    | "soreness"
+    | "sleepQuality"
+    | "pain"
+    | "availableTimeMinutes"
+    | "preferredActivity"
+    | "completedYesterday"
+    | "source"
+    | "createdAt"
+    | "updatedAt",
+    LlmBundleCheckInValue
+  >
+>;
 
 export type LlmBundleSource = {
   name: string;
@@ -31,8 +51,14 @@ export type LlmBundleOptions = {
   exportedAt?: string | Date;
   goalProfile?: GoalProfile | null;
   riskFlags?: RiskFlags | null;
-  currentCheckIn?: unknown | null;
-  checkInHistory?: unknown[];
+  currentCheckIn?:
+    | DailyCheckIn
+    | LlmBundleCheckIn
+    | Record<string, unknown>
+    | null;
+  checkInHistory?: Array<
+    DailyCheckIn | LlmBundleCheckIn | Record<string, unknown>
+  >;
 };
 
 export type LlmBundle = {
@@ -76,8 +102,8 @@ export type LlmBundle = {
     confidence: number;
   };
   dailyCheckIn: {
-    currentCheckIn: unknown | null;
-    checkInHistory: unknown[];
+    currentCheckIn: LlmBundleCheckIn | null;
+    checkInHistory: LlmBundleCheckIn[];
   };
   sourceFreshness: LlmBundleSource[];
   riskFlags: RiskFlags;
@@ -100,15 +126,44 @@ function recommendationUsability(
   return "unusable";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function localDateFromUtc(value: number): string {
+  return new Date(value).toISOString().slice(0, 10);
+}
+
+function derivedDateRange(
+  source: SourceFreshness,
+): LlmBundleSource["dateRange"] {
+  const end = source.latestLocalDate ?? null;
+  if (!end) {
+    return { start: null, end: null };
+  }
+
+  if (source.earliestLocalDate) {
+    return { start: source.earliestLocalDate, end };
+  }
+
+  const endTime = Date.parse(`${end}T00:00:00.000Z`);
+  if (!Number.isFinite(endTime) || source.dayCount <= 1) {
+    return { start: end, end };
+  }
+  const dayMs = 24 * 60 * 60 * 1000;
+  const startTime = endTime - (source.dayCount - 1) * dayMs;
+  return {
+    start: localDateFromUtc(startTime),
+    end,
+  };
+}
+
 function toBundleSource(source: SourceFreshness): LlmBundleSource {
   return {
     name: source.label,
     domain: source.domain,
     canonicalTypes: source.canonicalTypes,
-    dateRange: {
-      start: source.latestLocalDate ?? null,
-      end: source.latestLocalDate ?? null,
-    },
+    dateRange: derivedDateRange(source),
     lastUpdatedAt: source.lastUpdatedAt ?? null,
     confidenceOrCompleteness: source.state,
     staleness: {
@@ -118,6 +173,51 @@ function toBundleSource(source: SourceFreshness): LlmBundleSource {
     recommendationUsability: recommendationUsability(source),
     limitations: source.limitations,
   };
+}
+
+const checkInFields = [
+  "localDate",
+  "energy",
+  "soreness",
+  "sleepQuality",
+  "pain",
+  "availableTimeMinutes",
+  "preferredActivity",
+  "completedYesterday",
+  "source",
+  "createdAt",
+  "updatedAt",
+] as const;
+
+function compactCheckIn(value: unknown): LlmBundleCheckIn | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const output: LlmBundleCheckIn = {};
+  for (const field of checkInFields) {
+    const candidate = value[field];
+    if (
+      candidate == null ||
+      typeof candidate === "string" ||
+      typeof candidate === "number" ||
+      typeof candidate === "boolean"
+    ) {
+      if (candidate !== undefined) {
+        output[field] = candidate;
+      }
+      continue;
+    }
+
+    if (
+      Array.isArray(candidate) &&
+      candidate.every((item): item is string => typeof item === "string")
+    ) {
+      output[field] = candidate;
+    }
+  }
+
+  return Object.keys(output).length ? output : null;
 }
 
 function compactDailyMetrics(row: DailyMetrics): Partial<DailyMetrics> {
@@ -163,12 +263,18 @@ export function buildLlmBundle(
   const exportedAt = isoString(options.exportedAt);
   const goalProfile = options.goalProfile ?? null;
   const readiness = snapshot.recommendation.readinessStatus;
+  const currentCheckIn = compactCheckIn(
+    options.currentCheckIn ?? snapshot.todayCheckIn,
+  );
+  const checkInHistory = (options.checkInHistory ?? snapshot.checkInHistory)
+    .map(compactCheckIn)
+    .filter((checkIn): checkIn is LlmBundleCheckIn => checkIn !== null);
   const riskFlags =
     options.riskFlags ??
     extractRiskFlagsFromCoachRequest({
       generated_at: exportedAt,
       goal_profile: goalProfile ?? undefined,
-      daily_check_in: options.currentCheckIn ?? undefined,
+      daily_check_in: currentCheckIn ?? undefined,
     });
 
   return {
@@ -211,8 +317,8 @@ export function buildLlmBundle(
       confidence: goalProfile?.confidence ?? 0,
     },
     dailyCheckIn: {
-      currentCheckIn: options.currentCheckIn ?? null,
-      checkInHistory: options.checkInHistory ?? [],
+      currentCheckIn,
+      checkInHistory,
     },
     sourceFreshness: snapshot.sourceFreshness.map(toBundleSource),
     riskFlags,

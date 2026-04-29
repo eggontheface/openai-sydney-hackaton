@@ -40,6 +40,7 @@ function snapshot(): PipelineSnapshot {
         canonicalTypes: ["sleep_session"],
         sampleCount: 4,
         dayCount: 4,
+        earliestLocalDate: "2026-04-20",
         latestLocalDate: "2026-04-28",
         lastUpdatedAt: "2026-04-29T03:30:00.000Z",
         ageDays: 1,
@@ -123,6 +124,8 @@ function snapshot(): PipelineSnapshot {
         }),
       },
     ],
+    todayCheckIn: null,
+    checkInHistory: [],
     trainingLoad: buildTrainingLoadSnapshot(),
     recommendation: completeCoachRecommendation({
       readiness: 82,
@@ -188,7 +191,7 @@ describe("buildLlmBundle", () => {
     expect(bundle.dailyCheckIn.checkInHistory).toEqual([]);
     expect(bundle.sourceFreshness[0]).toMatchObject({
       name: "Sleep",
-      dateRange: { start: "2026-04-28", end: "2026-04-28" },
+      dateRange: { start: "2026-04-20", end: "2026-04-28" },
       lastUpdatedAt: "2026-04-29T03:30:00.000Z",
       confidenceOrCompleteness: "fresh",
       staleness: { state: "fresh", ageDays: 1 },
@@ -207,6 +210,90 @@ describe("buildLlmBundle", () => {
     );
     expect(JSON.stringify(bundle)).not.toContain("rawJson");
     expect(JSON.stringify(bundle)).not.toContain("metadataJson");
+  });
+
+  it("exports only allowlisted daily check-in fields", () => {
+    const bundle = buildLlmBundle(snapshot(), {
+      exportedAt: "2026-04-29T05:00:00.000Z",
+      currentCheckIn: {
+        localDate: "2026-04-29",
+        sleepQuality: 4,
+        soreness: 2,
+        energy: 3,
+        pain: "moderate",
+        availableTimeMinutes: 45,
+        preferredActivity: "mobility",
+        completedYesterday: false,
+        source: "user_reported",
+        createdAt: "2026-04-29T04:00:00.000Z",
+        updatedAt: "2026-04-29T04:30:00.000Z",
+        date: "2026-04-29",
+        checkedInAt: "2026-04-29T04:30:00.000Z",
+        mood: "Sharp pain words should not leak",
+        stress: "fever words should not leak",
+        fatigue: "faint words should not leak",
+        illness: "illness words should not leak",
+        constraints: ["chest pain words should not leak"],
+        readiness: "red flag words should not leak",
+        rawRecords: [{ private: true }],
+        metadataJson: '{"leak":true}',
+        nestedRawPayload: { symptomSurvey: "sharp pain should not leak" },
+      },
+      checkInHistory: [
+        {
+          localDate: "2026-04-28",
+          sleepQuality: 3,
+          soreness: 3,
+          energy: 5,
+          pain: "none",
+          availableTimeMinutes: 30,
+          preferredActivity: "easy_cardio",
+          completedYesterday: true,
+          source: "user_reported",
+          internalId: "checkin-raw-1",
+        },
+      ],
+    });
+
+    expect(bundle.dailyCheckIn.currentCheckIn).toEqual({
+      localDate: "2026-04-29",
+      sleepQuality: 4,
+      soreness: 2,
+      energy: 3,
+      pain: "moderate",
+      availableTimeMinutes: 45,
+      preferredActivity: "mobility",
+      completedYesterday: false,
+      source: "user_reported",
+      createdAt: "2026-04-29T04:00:00.000Z",
+      updatedAt: "2026-04-29T04:30:00.000Z",
+    });
+    expect(bundle.dailyCheckIn.checkInHistory).toEqual([
+      {
+        localDate: "2026-04-28",
+        sleepQuality: 3,
+        soreness: 3,
+        energy: 5,
+        pain: "none",
+        availableTimeMinutes: 30,
+        preferredActivity: "easy_cardio",
+        completedYesterday: true,
+        source: "user_reported",
+      },
+    ]);
+    expect(bundle.riskFlags.highest_severity).toBe("none");
+    expect(JSON.stringify(bundle.dailyCheckIn)).not.toContain("rawRecords");
+    expect(JSON.stringify(bundle.dailyCheckIn)).not.toContain("metadataJson");
+    expect(JSON.stringify(bundle.dailyCheckIn)).not.toContain("internalId");
+    expect(JSON.stringify(bundle.dailyCheckIn)).not.toContain("checkedInAt");
+    expect(JSON.stringify(bundle.dailyCheckIn)).not.toContain("mood");
+    expect(JSON.stringify(bundle.dailyCheckIn)).not.toContain("constraints");
+    expect(JSON.stringify(bundle.dailyCheckIn)).not.toContain("readiness");
+    expect(JSON.stringify(bundle.dailyCheckIn)).not.toContain(
+      "nestedRawPayload",
+    );
+    expect(JSON.stringify(bundle.riskFlags)).not.toContain("sharp pain");
+    expect(JSON.stringify(bundle.riskFlags)).not.toContain("chest pain");
   });
 
   it("keeps the llm bundle smaller than a full raw export payload", () => {
