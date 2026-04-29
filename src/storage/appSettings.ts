@@ -1,32 +1,41 @@
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from "expo-secure-store";
 
-import { resolveOpenAiApiKey } from '../config/openAiKeyFallback';
-import type { OpenAiApiKeySource } from '../config/openAiKeyFallback';
-import { localOpenAiApiKey } from '../config/localOpenAiApiKey.generated';
+import { resolveOpenAiApiKey } from "../config/openAiKeyFallback";
+import type { OpenAiApiKeySource } from "../config/openAiKeyFallback";
+import { localOpenAiApiKey } from "../config/localOpenAiApiKey.generated";
 
 export type AppSettings = {
   hasOpenAiApiKey: boolean;
   openAiApiKeySource: OpenAiApiKeySource;
   defaultSyncRangeDays: number;
+  athleteName: string | null;
 };
 
 type StoredAppSettings = {
   defaultSyncRangeDays?: number;
+  athleteName?: string | null;
 };
 
-const openAiApiKeyStorageKey = 'biostream.openai_api_key';
-const appSettingsStorageKey = 'biostream.local_settings';
+const openAiApiKeyStorageKey = "biostream.openai_api_key";
+const appSettingsStorageKey = "biostream.local_settings";
 const fallbackSettings: StoredAppSettings = {
   defaultSyncRangeDays: 365,
 };
 const allowedSyncRanges = new Set([7, 30, 365]);
 
 function normalizeSettings(settings: StoredAppSettings): StoredAppSettings {
-  const defaultSyncRangeDays = allowedSyncRanges.has(Number(settings.defaultSyncRangeDays))
+  const defaultSyncRangeDays = allowedSyncRanges.has(
+    Number(settings.defaultSyncRangeDays),
+  )
     ? Number(settings.defaultSyncRangeDays)
     : fallbackSettings.defaultSyncRangeDays;
+  const athleteName =
+    typeof settings.athleteName === "string" && settings.athleteName.trim()
+      ? settings.athleteName.trim().slice(0, 80)
+      : null;
 
   return {
+    athleteName,
     defaultSyncRangeDays,
   };
 }
@@ -51,18 +60,21 @@ export async function loadAppSettings(): Promise<AppSettings> {
   ]);
   const activeApiKey = resolveOpenAiApiKey({
     storedApiKey: apiKey,
-    storedSource: 'secure_store',
+    storedSource: "secure_store",
     embeddedApiKey: localOpenAiApiKey,
   });
 
   return {
+    athleteName: settings.athleteName ?? null,
     hasOpenAiApiKey: Boolean(activeApiKey.apiKey),
     openAiApiKeySource: activeApiKey.source,
     defaultSyncRangeDays: settings.defaultSyncRangeDays ?? 365,
   };
 }
 
-export async function saveAppSettings(settings: Partial<StoredAppSettings>): Promise<AppSettings> {
+export async function saveAppSettings(
+  settings: Partial<StoredAppSettings>,
+): Promise<AppSettings> {
   const current = await loadStoredSettings();
   const next = normalizeSettings({
     ...current,
@@ -76,7 +88,7 @@ export async function saveAppSettings(settings: Partial<StoredAppSettings>): Pro
 export async function saveOpenAiApiKey(apiKey: string): Promise<AppSettings> {
   const trimmed = apiKey.trim();
   if (!trimmed) {
-    throw new Error('Enter an API key before saving.');
+    throw new Error("Enter an API key before saving.");
   }
 
   await SecureStore.setItemAsync(openAiApiKeyStorageKey, trimmed);
@@ -92,7 +104,7 @@ export async function readOpenAiApiKey(): Promise<string | null> {
   const apiKey = await SecureStore.getItemAsync(openAiApiKeyStorageKey);
   return resolveOpenAiApiKey({
     storedApiKey: apiKey,
-    storedSource: 'secure_store',
+    storedSource: "secure_store",
     embeddedApiKey: localOpenAiApiKey,
   }).apiKey;
 }

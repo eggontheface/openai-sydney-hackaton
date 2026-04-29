@@ -7,7 +7,7 @@ import {
   Text,
   TextInput,
   View,
-} from 'react-native';
+} from "react-native";
 import {
   Activity,
   ChartColumn,
@@ -22,31 +22,37 @@ import {
   Settings,
   Shield,
   Trash2,
+  User,
   Zap,
   type LucideIcon,
-} from 'lucide-react-native';
+} from "lucide-react-native";
 
-import { ranges } from '../core/constants';
-import { dataAge, formatDateKey, formatNumber, metricLabel } from '../core/formatters';
-import { availabilityForTypes } from '../core/metricAvailability';
-import type { LastSync, SyncRuns } from '../core/types';
+import { ranges } from "../core/constants";
+import {
+  dataAge,
+  formatDateKey,
+  formatNumber,
+  metricLabel,
+} from "../core/formatters";
+import { availabilityForTypes } from "../core/metricAvailability";
+import type { LastSync, SyncRuns } from "../core/types";
 import {
   currentHealthProviderLabel,
   openCurrentPlatformHealthSettings,
-} from '../health/syncPipeline';
+} from "../health/syncPipeline";
 import type {
   CanonicalType,
   DailyMetrics,
   HealthConnectReadDiagnostic,
   PipelineSnapshot,
   SourceFreshness,
-} from '../health/types';
-import { formatRange, formatShortDateTime } from '../lib/dates';
-import type { AppSettings } from '../storage/appSettings';
-import { styles } from '../styles/appStyles';
-import { tokens } from '../theme/tokens';
-import { AppButton, SectionLabel } from '../ui/primitives';
-import { AnalyticsPanel } from './AnalyticsScreen';
+} from "../health/types";
+import { formatRange, formatShortDateTime } from "../lib/dates";
+import type { AppSettings } from "../storage/appSettings";
+import { styles } from "../styles/appStyles";
+import { tokens } from "../theme/tokens";
+import { AppButton, SectionLabel } from "../ui/primitives";
+import { AnalyticsPanel } from "./AnalyticsScreen";
 
 function PermissionRow({
   icon: Icon,
@@ -68,7 +74,9 @@ function PermissionRow({
       </View>
       <View style={[styles.toggle, active && styles.toggleActive]}>
         <View style={[styles.toggleKnob, active && styles.toggleKnobActive]}>
-          {active ? <Check color={tokens.accent} size={11} strokeWidth={3} /> : null}
+          {active ? (
+            <Check color={tokens.accent} size={11} strokeWidth={3} />
+          ) : null}
         </View>
       </View>
     </View>
@@ -76,57 +84,80 @@ function PermissionRow({
 }
 
 function diagnosticTitle(diagnostic: HealthConnectReadDiagnostic): string {
-  const kind = diagnostic.readKind === 'aggregate' ? 'daily' : 'records';
+  const kind = diagnostic.readKind === "aggregate" ? "daily" : "records";
   return `${metricLabel(diagnostic.canonicalType)} · ${kind}`;
 }
 
 function diagnosticDetail(diagnostic: HealthConnectReadDiagnostic): string {
   const permission =
-    diagnostic.permission === 'granted' ? 'Permission granted' : 'Permission missing';
+    diagnostic.permission === "granted"
+      ? "Permission granted"
+      : "Permission missing";
   const counts = `${diagnostic.recordsRead} read · ${diagnostic.samplesWritten} saved`;
-  return diagnostic.message ? `${permission} · ${counts} · ${diagnostic.message}` : `${permission} · ${counts}`;
+  return diagnostic.message
+    ? `${permission} · ${counts} · ${diagnostic.message}`
+    : `${permission} · ${counts}`;
 }
 
-function DiagnosticRow({ diagnostic }: { diagnostic: HealthConnectReadDiagnostic }) {
-  const active = diagnostic.permission === 'granted' && diagnostic.samplesWritten > 0;
+function DiagnosticRow({
+  diagnostic,
+}: {
+  diagnostic: HealthConnectReadDiagnostic;
+}) {
+  const active =
+    diagnostic.permission === "granted" && diagnostic.samplesWritten > 0;
 
   return (
     <View style={styles.diagnosticRow}>
-      <View style={[styles.diagnosticDot, active && styles.diagnosticDotActive]} />
+      <View
+        style={[styles.diagnosticDot, active && styles.diagnosticDotActive]}
+      />
       <View style={styles.diagnosticCopy}>
-        <Text style={styles.diagnosticTitle}>{diagnosticTitle(diagnostic)}</Text>
-        <Text style={styles.diagnosticDetail}>{diagnosticDetail(diagnostic)}</Text>
+        <Text style={styles.diagnosticTitle}>
+          {diagnosticTitle(diagnostic)}
+        </Text>
+        <Text style={styles.diagnosticDetail}>
+          {diagnosticDetail(diagnostic)}
+        </Text>
       </View>
     </View>
   );
 }
 
-function freshnessStateLabel(state: SourceFreshness['state']): string {
-  if (state === 'fresh') return 'Fresh';
-  if (state === 'partial') return 'Partial';
-  if (state === 'stale') return 'Stale';
-  return 'Missing';
+function freshnessStateLabel(state: SourceFreshness["state"]): string {
+  if (state === "fresh") return "Fresh";
+  if (state === "partial") return "Partial";
+  if (state === "stale") return "Stale";
+  return "Missing";
 }
 
-function freshnessBadgeStyle(state: SourceFreshness['state']) {
-  if (state === 'fresh') return styles.scoreBadge_live;
-  if (state === 'partial') return styles.scoreBadge_permission;
-  if (state === 'stale') return styles.scoreBadge_empty;
+function freshnessBadgeStyle(state: SourceFreshness["state"]) {
+  if (state === "fresh") return styles.scoreBadge_live;
+  if (state === "partial") return styles.scoreBadge_permission;
+  if (state === "stale") return styles.scoreBadge_empty;
   return styles.scoreBadge_unchecked;
 }
 
 function SourceFreshnessRow({ source }: { source: SourceFreshness }) {
-  const active = source.state === 'fresh' || source.state === 'partial';
+  const active = source.state === "fresh" || source.state === "partial";
   const detailParts = [
-    source.latestLocalDate ? `Latest ${formatDateKey(source.latestLocalDate)}` : null,
-    source.lastUpdatedAt ? `Updated ${formatShortDateTime(source.lastUpdatedAt)}` : null,
+    source.latestLocalDate
+      ? `Latest ${formatDateKey(source.latestLocalDate)}`
+      : null,
+    source.lastUpdatedAt
+      ? `Updated ${formatShortDateTime(source.lastUpdatedAt)}`
+      : null,
     source.sampleCount ? `${formatNumber(source.sampleCount)} rows` : null,
   ].filter(Boolean);
-  const detail = [...detailParts, ...source.limitations].join(' · ') || 'No status detail available';
+  const detail =
+    [...detailParts, ...source.limitations].join(" · ") ||
+    "No status detail available";
 
   return (
     <View style={styles.diagnosticRow}>
-      <View style={[styles.diagnosticDot, active && styles.diagnosticDotActive]} />
+      <View
+        style={[styles.diagnosticDot, active && styles.diagnosticDotActive]}
+      />
       <View style={styles.diagnosticCopy}>
         <View style={styles.scoreTitleLine}>
           <Text style={styles.diagnosticTitle}>{source.label}</Text>
@@ -141,12 +172,12 @@ function SourceFreshnessRow({ source }: { source: SourceFreshness }) {
 }
 
 function providerName(provider: string): string {
-  if (provider === 'healthkit') {
-    return 'Apple Health';
+  if (provider === "healthkit") {
+    return "Apple Health";
   }
 
-  if (provider === 'health_connect') {
-    return 'Health Connect';
+  if (provider === "health_connect") {
+    return "Health Connect";
   }
 
   return provider;
@@ -160,10 +191,10 @@ function syncRunRangeLabel(run: NonNullable<LastSync>): string {
 }
 
 function SyncRunHistoryRow({ run }: { run: SyncRuns[number] }) {
-  const statusOk = run.status === 'ok';
+  const statusOk = run.status === "ok";
   const detailParts = [
     providerName(run.provider),
-    run.sync_type === 'incremental' ? 'Incremental' : 'Manual',
+    run.sync_type === "incremental" ? "Incremental" : "Manual",
     syncRunRangeLabel(run),
   ];
   const countParts = [
@@ -178,21 +209,30 @@ function SyncRunHistoryRow({ run }: { run: SyncRuns[number] }) {
     <View style={styles.syncRunRow}>
       <View style={styles.syncRunTopLine}>
         <View style={styles.syncRunTitleWrap}>
-          <Text style={styles.syncRunTitle}>{formatShortDateTime(run.started_at)}</Text>
-          <Text style={styles.syncRunDetail}>{detailParts.join(' · ')}</Text>
+          <Text style={styles.syncRunTitle}>
+            {formatShortDateTime(run.started_at)}
+          </Text>
+          <Text style={styles.syncRunDetail}>{detailParts.join(" · ")}</Text>
         </View>
-        <View style={[styles.syncRunBadge, statusOk ? styles.syncRunBadgeOk : styles.syncRunBadgeError]}>
+        <View
+          style={[
+            styles.syncRunBadge,
+            statusOk ? styles.syncRunBadgeOk : styles.syncRunBadgeError,
+          ]}
+        >
           <Text
             style={[
               styles.syncRunBadgeText,
-              statusOk ? styles.syncRunBadgeTextOk : styles.syncRunBadgeTextError,
+              statusOk
+                ? styles.syncRunBadgeTextOk
+                : styles.syncRunBadgeTextError,
             ]}
           >
-            {statusOk ? 'OK' : 'Error'}
+            {statusOk ? "OK" : "Error"}
           </Text>
         </View>
       </View>
-      <Text style={styles.syncRunCounts}>{countParts.join(' · ')}</Text>
+      <Text style={styles.syncRunCounts}>{countParts.join(" · ")}</Text>
       {run.warning_count || run.diagnostic_count ? (
         <Text style={styles.syncRunDetail}>
           {`${run.warning_count.toLocaleString()} warnings · ${run.diagnostic_count.toLocaleString()} diagnostics`}
@@ -219,11 +259,13 @@ export function SourceScreen({
   lastSuccessfulSync,
   recentSyncRuns,
   appSettings,
+  athleteNameDraft,
   apiKeyDraft,
   settingsBusy,
   busy,
   status,
   rangeDays,
+  setAthleteNameDraft,
   setRangeDays,
   setApiKeyDraft,
   onSync,
@@ -231,6 +273,7 @@ export function SourceScreen({
   onExport,
   onClear,
   onSaveApiKey,
+  onSaveAthleteName,
   onClearApiKey,
   onSetDefaultRange,
 }: {
@@ -239,11 +282,13 @@ export function SourceScreen({
   lastSuccessfulSync: LastSync;
   recentSyncRuns: SyncRuns;
   appSettings: AppSettings;
+  athleteNameDraft: string;
   apiKeyDraft: string;
   settingsBusy: boolean;
   busy: boolean;
   status: string;
   rangeDays: number;
+  setAthleteNameDraft: (value: string) => void;
   setRangeDays: (value: number) => void;
   setApiKeyDraft: (value: string) => void;
   onSync: () => void;
@@ -251,31 +296,40 @@ export function SourceScreen({
   onExport: () => void;
   onClear: () => void;
   onSaveApiKey: () => void;
+  onSaveAthleteName: () => void;
   onClearApiKey: () => void;
   onSetDefaultRange: (value: number) => void;
 }) {
   const sourceLabel = currentHealthProviderLabel();
-  const canRunNativeSync = Platform.OS === 'ios' || Platform.OS === 'android';
-  const displaySourceLabel = canRunNativeSync ? sourceLabel : 'Web preview';
-  const pipelineTitle = canRunNativeSync ? 'Local health pipeline' : 'Browser demo dataset';
+  const canRunNativeSync = Platform.OS === "ios" || Platform.OS === "android";
+  const displaySourceLabel = canRunNativeSync ? sourceLabel : "Web preview";
+  const pipelineTitle = canRunNativeSync
+    ? "Local health pipeline"
+    : "Browser demo dataset";
   const pipelineText = canRunNativeSync
     ? `Reads ${sourceLabel} records into schema tables, then derives the coaching surface from daily rollups. Nothing leaves the device from this app.`
-    : 'The web preview uses a local mock PipelineSnapshot so the demo can run in the browser. Real Apple Health or Health Connect sync requires a native mobile build.';
+    : "The web preview uses a local mock PipelineSnapshot so the demo can run in the browser. Real Apple Health or Health Connect sync requires a native mobile build.";
   const apiKeyStatus =
-    appSettings.openAiApiKeySource === 'secure_store'
-      ? 'Saved on this device'
-      : appSettings.openAiApiKeySource === 'local_storage'
-        ? 'Saved in browser local storage'
-      : appSettings.openAiApiKeySource === 'embedded'
-        ? 'Using bundled demo key'
-        : 'Not saved';
-  const apiKeyPlaceholder = appSettings.hasOpenAiApiKey ? 'Replace active key' : 'sk-...';
+    appSettings.openAiApiKeySource === "secure_store"
+      ? "Saved on this device"
+      : appSettings.openAiApiKeySource === "local_storage"
+        ? "Saved in browser local storage"
+        : appSettings.openAiApiKeySource === "embedded"
+          ? "Using bundled demo key"
+          : "Not saved";
+  const apiKeyPlaceholder = appSettings.hasOpenAiApiKey
+    ? "Replace active key"
+    : "sk-...";
+  const normalizedAthleteNameDraft = athleteNameDraft.trim();
+  const savedAthleteName = appSettings.athleteName ?? "";
+  const athleteNameStatus = savedAthleteName || "Not set";
+  const athleteNameUnchanged = normalizedAthleteNameDraft === savedAthleteName;
   const diagnosticFocus: CanonicalType[] = [
-    'sleep_session',
-    'resting_heart_rate',
-    'hrv_rmssd',
-    'hrv_sdnn',
-    'heart_rate',
+    "sleep_session",
+    "resting_heart_rate",
+    "hrv_rmssd",
+    "hrv_sdnn",
+    "heart_rate",
   ];
   const focusedDiagnostics = snapshot.latestDiagnostics.filter((diagnostic) =>
     diagnosticFocus.includes(diagnostic.canonicalType),
@@ -289,8 +343,8 @@ export function SourceScreen({
   const hasSleepSignal =
     snapshot.sleepCount > 0 ||
     hasHistory((day) => day.sleepSeconds != null) ||
-    hasSamples(['sleep_session']) ||
-    hasAvailability(['sleep_session']);
+    hasSamples(["sleep_session"]) ||
+    hasAvailability(["sleep_session"]);
   const hasVitalsSignal =
     hasHistory(
       (day) =>
@@ -299,17 +353,32 @@ export function SourceScreen({
         day.hrvLastNightAvg != null ||
         day.vo2max != null,
     ) ||
-    hasSamples(['heart_rate', 'resting_heart_rate', 'hrv_rmssd', 'hrv_sdnn', 'vo2max']) ||
-    hasAvailability(['heart_rate', 'resting_heart_rate', 'hrv_rmssd', 'hrv_sdnn', 'vo2max']);
-  const hasWorkoutSignal = snapshot.workoutCount > 0 || hasAvailability(['workout']);
+    hasSamples([
+      "heart_rate",
+      "resting_heart_rate",
+      "hrv_rmssd",
+      "hrv_sdnn",
+      "vo2max",
+    ]) ||
+    hasAvailability([
+      "heart_rate",
+      "resting_heart_rate",
+      "hrv_rmssd",
+      "hrv_sdnn",
+      "vo2max",
+    ]);
+  const hasWorkoutSignal =
+    snapshot.workoutCount > 0 || hasAvailability(["workout"]);
   const hasActivitySignal =
-    hasHistory((day) => day.hasSteps || day.hasEnergy || day.distanceKm != null) ||
-    hasSamples(['steps', 'active_energy', 'total_energy', 'distance']) ||
-    hasAvailability(['steps', 'active_energy', 'total_energy', 'distance']);
+    hasHistory(
+      (day) => day.hasSteps || day.hasEnergy || day.distanceKm != null,
+    ) ||
+    hasSamples(["steps", "active_energy", "total_energy", "distance"]) ||
+    hasAvailability(["steps", "active_energy", "total_energy", "distance"]);
   const hasNutritionSignal =
     snapshot.nutritionDays > 0 ||
-    hasSamples(['nutrition', 'hydration']) ||
-    hasAvailability(['nutrition', 'hydration']);
+    hasSamples(["nutrition", "hydration"]) ||
+    hasAvailability(["nutrition", "hydration"]);
   const hasBodySignal =
     hasHistory(
       (day) =>
@@ -317,8 +386,8 @@ export function SourceScreen({
         day.bodyFatPct != null ||
         day.leanBodyMassKg != null,
     ) ||
-    hasSamples(['weight', 'body_fat', 'lean_body_mass']) ||
-    hasAvailability(['weight', 'body_fat', 'lean_body_mass']);
+    hasSamples(["weight", "body_fat", "lean_body_mass"]) ||
+    hasAvailability(["weight", "body_fat", "lean_body_mass"]);
 
   return (
     <View style={styles.screen}>
@@ -327,7 +396,10 @@ export function SourceScreen({
         <Text style={styles.pageTitle}>{displaySourceLabel}</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.pageContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.pageContent}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.connectCard}>
           <View style={styles.connectIcon}>
             {busy ? (
@@ -349,7 +421,10 @@ export function SourceScreen({
               accessibilityRole="button"
               key={days}
               onPress={() => setRangeDays(days)}
-              style={[styles.rangeButton, days === rangeDays && styles.rangeButtonActive]}
+              style={[
+                styles.rangeButton,
+                days === rangeDays && styles.rangeButtonActive,
+              ]}
             >
               <Text
                 style={[
@@ -367,7 +442,9 @@ export function SourceScreen({
           <AppButton
             disabled={busy || !canRunNativeSync}
             icon={RefreshCw}
-            label={busy ? 'Syncing' : canRunNativeSync ? 'Sync' : 'Mobile sync only'}
+            label={
+              busy ? "Syncing" : canRunNativeSync ? "Sync" : "Mobile sync only"
+            }
             onPress={onSync}
             variant="primary"
           />
@@ -387,14 +464,19 @@ export function SourceScreen({
           />
         </View>
         <View style={styles.actionsRow}>
-          {Platform.OS === 'android' ? (
+          {Platform.OS === "android" ? (
             <AppButton
               disabled={busy}
               icon={Settings}
               label="Permissions"
-              onPress={() => void openCurrentPlatformHealthSettings().catch((error) => {
-                Alert.alert('Health settings', String(error instanceof Error ? error.message : error));
-              })}
+              onPress={() =>
+                void openCurrentPlatformHealthSettings().catch((error) => {
+                  Alert.alert(
+                    "Health settings",
+                    String(error instanceof Error ? error.message : error),
+                  );
+                })
+              }
             />
           ) : null}
           <AppButton
@@ -423,6 +505,34 @@ export function SourceScreen({
         <View style={styles.settingsCard}>
           <View style={styles.settingsHeader}>
             <View style={styles.settingsIcon}>
+              <User color={tokens.accent} size={18} strokeWidth={2} />
+            </View>
+            <View style={styles.settingsCopy}>
+              <Text style={styles.settingsTitle}>Preferred name</Text>
+              <Text style={styles.settingsMeta}>{athleteNameStatus}</Text>
+            </View>
+          </View>
+          <TextInput
+            autoCapitalize="words"
+            autoCorrect={false}
+            onChangeText={setAthleteNameDraft}
+            placeholder="Name"
+            placeholderTextColor={tokens.muted}
+            style={styles.apiKeyInput}
+            value={athleteNameDraft}
+          />
+          <View style={styles.actionsRow}>
+            <AppButton
+              disabled={settingsBusy || athleteNameUnchanged}
+              icon={Check}
+              label="Save name"
+              onPress={onSaveAthleteName}
+            />
+          </View>
+
+          <View style={styles.settingDivider} />
+          <View style={styles.settingsHeader}>
+            <View style={styles.settingsIcon}>
               <Lock color={tokens.accent} size={18} strokeWidth={2} />
             </View>
             <View style={styles.settingsCopy}>
@@ -444,7 +554,7 @@ export function SourceScreen({
             <AppButton
               disabled={settingsBusy || !apiKeyDraft.trim()}
               icon={Check}
-              label={appSettings.hasOpenAiApiKey ? 'Replace' : 'Save'}
+              label={appSettings.hasOpenAiApiKey ? "Replace" : "Save"}
               onPress={onSaveApiKey}
             />
             <AppButton
@@ -460,7 +570,9 @@ export function SourceScreen({
           <View style={styles.settingRow}>
             <View style={styles.settingsCopy}>
               <Text style={styles.settingsTitle}>Default sync range</Text>
-              <Text style={styles.settingsMeta}>{appSettings.defaultSyncRangeDays} days</Text>
+              <Text style={styles.settingsMeta}>
+                {appSettings.defaultSyncRangeDays} days
+              </Text>
             </View>
             <View style={styles.settingSegments}>
               {ranges.map((days) => (
@@ -471,7 +583,8 @@ export function SourceScreen({
                   onPress={() => onSetDefaultRange(days)}
                   style={[
                     styles.settingSegment,
-                    appSettings.defaultSyncRangeDays === days && styles.settingSegmentActive,
+                    appSettings.defaultSyncRangeDays === days &&
+                      styles.settingSegmentActive,
                   ]}
                 >
                   <Text
@@ -496,7 +609,9 @@ export function SourceScreen({
               <SourceFreshnessRow key={source.domain} source={source} />
             ))
           ) : (
-            <Text style={styles.emptyText}>Run a sync to derive source freshness.</Text>
+            <Text style={styles.emptyText}>
+              Run a sync to derive source freshness.
+            </Text>
           )}
         </View>
 
@@ -550,17 +665,19 @@ export function SourceScreen({
               />
             ))
           ) : (
-            <Text style={styles.emptyText}>Run a sync to see sleep and vitals read results.</Text>
+            <Text style={styles.emptyText}>
+              Run a sync to see sleep and vitals read results.
+            </Text>
           )}
         </View>
 
         <View style={styles.privacyCard}>
           <Lock color={tokens.muted} size={16} strokeWidth={2} />
           <Text style={styles.privacyText}>
-            {snapshot.trainingLoad.summary}{' '}
-            Vendor-only metrics such as stress, body battery, sleep score, and
-            training load are preserved only when a source writes them. They are not
-            fabricated from generic platform data.
+            {snapshot.trainingLoad.summary} Vendor-only metrics such as stress,
+            body battery, sleep score, and training load are preserved only when
+            a source writes them. They are not fabricated from generic platform
+            data.
           </Text>
         </View>
       </ScrollView>

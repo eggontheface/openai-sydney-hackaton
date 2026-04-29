@@ -45,6 +45,7 @@ import {
 } from "../ui/primitives";
 
 export function CoachOnboardingScreen({
+  athleteName,
   busy,
   canSync,
   onDiscussGoal,
@@ -55,6 +56,7 @@ export function CoachOnboardingScreen({
   status,
   snapshot,
 }: {
+  athleteName?: string | null;
   busy: boolean;
   canSync: boolean;
   onDiscussGoal: (request: {
@@ -92,9 +94,9 @@ export function CoachOnboardingScreen({
     constraints: "",
     summary: "",
   });
-  const athleteName: string | undefined = undefined;
-  const welcomeLine = athleteName
-    ? `Hello ${athleteName}, welcome to BioStream.`
+  const displayName = athleteName?.trim() || null;
+  const welcomeLine = displayName
+    ? `Hello ${displayName}, welcome to BioStream.`
     : "Hello, welcome to BioStream.";
   const connectLabel = `Connect ${sourceLabel}`;
   const dataActionLabel = canSync
