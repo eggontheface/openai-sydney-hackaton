@@ -24,6 +24,7 @@ function Icon({ name, size = 20, color = 'currentColor', stroke = 1.6 }) {
     case 'walk': return <svg viewBox="0 0 24 24" {...s}><circle cx="13" cy="4" r="2"/><path d="M7 21l3-7-2-3 2-4 3 2 3 5 3 1M5 13l3-1"/></svg>;
     case 'dumbbell': return <svg viewBox="0 0 24 24" {...s}><path d="M6 7v10M3 9v6M18 7v10M21 9v6M6 12h12"/></svg>;
     case 'bike': return <svg viewBox="0 0 24 24" {...s}><circle cx="5.5" cy="17" r="3.5"/><circle cx="18.5" cy="17" r="3.5"/><path d="M5.5 17l4-9h4l4 9M14 8h3M9 17l3-7"/></svg>;
+    case 'swim': return <svg viewBox="0 0 24 24" {...s}><path d="M4 17c2 0 2-1.5 4-1.5s2 1.5 4 1.5 2-1.5 4-1.5 2 1.5 4 1.5"/><path d="M4 21c2 0 2-1.5 4-1.5s2 1.5 4 1.5 2-1.5 4-1.5 2 1.5 4 1.5"/><path d="M9 12l4-6 3 2-3 4"/><circle cx="15.5" cy="4.5" r="1.7"/></svg>;
     case 'flame': return <svg viewBox="0 0 24 24" {...s}><path d="M12 22a7 7 0 0 0 7-7c0-3-2-5-4-8-1-1.5-2-3.5-2-5-2 2-7 5-7 11a6 6 0 0 0 6 6z"/></svg>;
     case 'flag': return <svg viewBox="0 0 24 24" {...s}><path d="M5 21V4M5 15h14l-3-5 3-5H5"/></svg>;
     case 'apple': return <svg viewBox="0 0 24 24" {...s}><path d="M12 7c-3-3-9-2-9 4 0 5 4 11 7 11 1 0 1-1 2-1s1 1 2 1c3 0 7-6 7-11 0-6-6-7-9-4z"/><path d="M12 7s0-3 3-4"/></svg>;

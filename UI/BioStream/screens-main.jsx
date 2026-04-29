@@ -187,40 +187,114 @@ function HomeScreen({ tokens, persona, goal = 'run', variant = 'hero', onTab, ac
 // ============================================================
 // WORKOUT DETAIL
 // ============================================================
-function WorkoutScreen({ tokens, persona, onBack }) {
-  const segments = [
-    { name: 'Warm-up',   detail: '10 min easy · Z1',           dur: '10:00', hr: '120–135' },
-    { name: 'Build',     detail: '5 min progressive · Z2→Z3',  dur: '5:00',  hr: '140–155' },
-    { name: 'Intervals', detail: '6 × 800m @ 5K · 2:00 rest',   dur: '24:00', hr: '170–180', accent: true },
-    { name: 'Cool down', detail: '6 min easy · Z1',             dur: '6:00',  hr: '120–130' },
-  ];
+function CoachDock({ tokens, context = 'plan', collapsed: controlledCollapsed, onCollapseChange }) {
+  const [localCollapsed, setLocalCollapsed] = React.useState(false);
+  const [question, setQuestion] = React.useState('');
+  const [reply, setReply] = React.useState('');
+  const collapsed = controlledCollapsed === undefined ? localCollapsed : controlledCollapsed;
+  const setCollapsed = onCollapseChange || setLocalCollapsed;
+  const isHistory = context === 'history';
+  const prompt = isHistory ? 'Ask about your history…' : 'Ask about today or the week…';
+  const submit = () => {
+    const trimmed = question.trim();
+    if (!trimmed) return;
+    const plan = window.BioStreamCoach?.generatePlan(window.BioStreamCoach.RAW_USER_DATA, { goal: 'run' });
+    const answer = window.BioStreamCoach?.answerCoachQuestion(trimmed, { plan });
+    setReply(answer?.text || 'I can help with that once the coach engine is connected.');
+    setQuestion('');
+    setCollapsed(false);
+  };
+  return (
+    <div style={{ padding: collapsed ? '8px 14px' : '10px 14px 12px', background: tokens.bg, borderTop: `1px solid ${tokens.lineSoft}` }}>
+      {collapsed ? (
+        <button onClick={() => setCollapsed(false)} style={{ marginLeft: 'auto', width: 46, height: 46, borderRadius: 99, background: tokens.ink, color: tokens.surface, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: tokens.shadowSm, cursor: 'pointer' }} aria-label="Expand coach chat">
+          <Icon name="sparkles" size={14} color={tokens.surface}/>
+        </button>
+      ) : (
+        <div>
+          {reply && (
+            <div style={{ marginBottom: 8, padding: '10px 12px', borderRadius: tokens.radius, background: tokens.surfaceAlt, border: `1px solid ${tokens.lineSoft}`, fontFamily: tokens.serif, fontSize: 14.5, lineHeight: 1.4, color: tokens.ink }}>
+              {reply}
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: tokens.surface, border: `1px solid ${tokens.line}`, borderRadius: 99 }}>
+              <Icon name="sparkles" size={15} color={tokens.ink}/>
+              <input value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} placeholder={prompt} style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', fontFamily: tokens.sans, fontSize: 13.5, color: tokens.ink }}/>
+              <Icon name="mic" size={15} color={tokens.muted}/>
+            </div>
+            <button onClick={question.trim() ? submit : () => setCollapsed(true)} style={{ width: 36, height: 36, borderRadius: 99, background: question.trim() ? tokens.ink : tokens.surface, color: question.trim() ? tokens.surface : tokens.muted, border: `1px solid ${question.trim() ? tokens.ink : tokens.line}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} aria-label={question.trim() ? 'Send coach question' : 'Collapse coach chat'}>
+              <Icon name={question.trim() ? 'send' : 'arrow-down'} size={14} color={question.trim() ? tokens.surface : tokens.muted}/>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WorkoutScreen({ tokens, persona, goal = 'run', onBack, onTab, active = 'workout' }) {
+  const [selectedDay, setSelectedDay] = React.useState(null);
+  const [coachCollapsed, setCoachCollapsed] = React.useState(false);
+  const plan = window.BioStreamCoach?.generatePlan(window.BioStreamCoach.RAW_USER_DATA, { goal }) || {};
+  const segments = plan.today?.segments || [];
+  const strengthSets = window.BioStreamCoach?.RAW_USER_DATA.strengthTemplate || [];
+  const week = plan.week || [];
+  const selected = selectedDay || week[0];
+  const selectedIsStrength = selected.icon === 'dumbbell';
+  const selectedIsWatch = ['run', 'walk', 'bike', 'swim'].includes(selected.icon);
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: tokens.bg, overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px' }}>
-        <div onClick={onBack} style={{ width: 36, height: 36, borderRadius: 99, background: tokens.surface, border: `1px solid ${tokens.line}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-          <Icon name="arrow-left" size={16} color={tokens.ink}/>
+        <div onClick={() => onBack ? onBack() : onTab && onTab('coach')} style={{ width: 36, height: 36, borderRadius: 99, background: tokens.surface, border: `1px solid ${tokens.line}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+          <Icon name={onBack ? 'arrow-left' : 'sparkles'} size={16} color={tokens.ink}/>
         </div>
-        <SectionLabel tokens={tokens}>Today's plan</SectionLabel>
+        <SectionLabel tokens={tokens}>Workout</SectionLabel>
         <div style={{ width: 36, height: 36, borderRadius: 99, background: tokens.surface, border: `1px solid ${tokens.line}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Icon name="more" size={16} color={tokens.ink}/>
         </div>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 20px 20px' }}>
-        <div style={{ fontFamily: tokens.serif, fontStyle: 'italic', fontSize: 13, color: tokens.accent }}>VO₂ max session</div>
+        <div style={{ fontSize: 12, color: tokens.muted, letterSpacing: 0.3 }}>Today · built from readiness</div>
         <h1 style={{ fontFamily: tokens.serif, fontSize: 30, fontWeight: 400, lineHeight: 1.1, color: tokens.ink, margin: '4px 0 6px', letterSpacing: -0.5 }}>
-          6 × 800m at 5K pace
+          Welcome to today’s workout
         </h1>
-        <div style={{ display: 'flex', gap: 16, fontSize: 13, color: tokens.muted, fontVariantNumeric: 'tabular-nums' }}>
-          <span><strong style={{ color: tokens.ink, fontWeight: 600 }}>45:00</strong> total</span>
-          <span><strong style={{ color: tokens.ink, fontWeight: 600 }}>~7.2 km</strong></span>
-          <span><strong style={{ color: tokens.ink, fontWeight: 600 }}>Hard</strong></span>
+        <p style={{ margin: '0 0 16px', fontSize: 13, color: tokens.muted, lineHeight: 1.45 }}>
+          One clear session for today, then a simple view of how the next seven days shape up.
+        </p>
+
+        <SectionLabel tokens={tokens} style={{ marginBottom: 10 }}>Workout today</SectionLabel>
+        <div style={{ padding: 16, background: tokens.surface, borderRadius: tokens.radius, border: `1px solid ${tokens.lineSoft}` }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <div style={{ width: 42, height: 42, borderRadius: 99, background: tokens.ink, color: tokens.surface, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Icon name="run" size={18} color={tokens.surface}/>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: tokens.serif, fontSize: 24, fontWeight: 400, lineHeight: 1.08, color: tokens.ink }}>6 × 800m at 5K pace</div>
+              <div style={{ display: 'flex', gap: 12, marginTop: 8, fontSize: 12.5, color: tokens.muted, fontVariantNumeric: 'tabular-nums' }}>
+                <span><strong style={{ color: tokens.ink }}>45:00</strong> total</span>
+                <span><strong style={{ color: tokens.ink }}>~7.2 km</strong></span>
+                <span><strong style={{ color: tokens.ink }}>Hard</strong></span>
+              </div>
+            </div>
+          </div>
+          <div style={{ marginTop: 14, padding: 12, borderRadius: tokens.radiusSm, background: tokens.surfaceAlt, border: `1px solid ${tokens.lineSoft}`, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            <Icon name="apple" size={16} color={tokens.accent}/>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 650, color: tokens.ink }}>Captured by Apple Watch</div>
+              <div style={{ fontSize: 12, color: tokens.muted, lineHeight: 1.45, marginTop: 2 }}>Distance, pace, heart rate, route, splits, and duration will be recorded automatically.</div>
+            </div>
+          </div>
         </div>
 
-        {/* Pace profile chart */}
+        <div style={{ display: 'flex', gap: 16, fontSize: 13, color: tokens.muted, fontVariantNumeric: 'tabular-nums' }}>
+        </div>
+
+        {/* Effort profile chart */}
         <div style={{ marginTop: 18, padding: 16, background: tokens.surface, borderRadius: tokens.radius, border: `1px solid ${tokens.lineSoft}` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
             <SectionLabel tokens={tokens}>Effort profile</SectionLabel>
-            <span style={{ fontSize: 11, color: tokens.muted }}>HR zones</span>
+            <span style={{ fontSize: 11, color: tokens.muted }}>Watch metrics</span>
           </div>
           <div style={{ marginTop: 12, height: 80, position: 'relative' }}>
             <svg viewBox="0 0 300 80" width="100%" height="80" preserveAspectRatio="none">
@@ -232,7 +306,7 @@ function WorkoutScreen({ tokens, persona, onBack }) {
           </div>
         </div>
 
-        {/* Segments */}
+        {/* Plan / manual metrics */}
         <SectionLabel tokens={tokens} style={{ marginTop: 22, marginBottom: 10 }}>Plan</SectionLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {segments.map((s, i) => (
@@ -269,14 +343,77 @@ function WorkoutScreen({ tokens, persona, onBack }) {
           <div style={{ fontSize: 13, color: tokens.inkSoft, lineHeight: 1.55 }}>
             {persona.recReason}
           </div>
+          <button onClick={() => setCoachCollapsed(false)} style={{ marginTop: 12, padding: '9px 12px', borderRadius: 99, background: tokens.surface, color: tokens.ink, border: `1px solid ${tokens.line}`, fontFamily: tokens.sans, fontSize: 12.5, fontWeight: 650, display: 'inline-flex', alignItems: 'center', gap: 7, cursor: 'pointer' }}>
+            Ask a follow-up <Icon name="arrow-right" size={12}/>
+          </button>
+        </div>
+
+        <SectionLabel tokens={tokens} style={{ marginTop: 22, marginBottom: 10 }}>Upcoming 7 days</SectionLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {week.map((d, i) => {
+            const isSelected = selected.day === d.day;
+            return (
+              <button key={d.day} onClick={() => setSelectedDay(d)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: isSelected ? tokens.ink : tokens.surface, color: isSelected ? tokens.surface : tokens.ink, borderRadius: tokens.radius, border: `1px solid ${isSelected ? tokens.ink : tokens.lineSoft}`, textAlign: 'left', fontFamily: tokens.sans, cursor: 'pointer' }}>
+                <div style={{ width: 34, height: 34, borderRadius: 99, background: isSelected ? 'rgba(255,255,255,0.12)' : tokens.surfaceAlt, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Icon name={d.icon} size={15} color={isSelected ? tokens.surface : d.tone}/>
+                </div>
+                <div style={{ width: 44, fontSize: 11.5, fontWeight: 700, color: isSelected ? 'rgba(255,255,255,0.7)' : tokens.muted }}>{d.day}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 650 }}>{d.title}</div>
+                  <div style={{ fontSize: 11.5, color: isSelected ? 'rgba(255,255,255,0.68)' : tokens.muted, marginTop: 2 }}>{d.detail}</div>
+                </div>
+                <Icon name="arrow-right" size={13} color={isSelected ? 'rgba(255,255,255,0.7)' : tokens.muted}/>
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ marginTop: 14, padding: 14, background: tokens.surface, borderRadius: tokens.radius, border: `1px solid ${tokens.lineSoft}` }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 99, background: tokens.surfaceAlt, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Icon name={selected.icon} size={16} color={selected.tone}/>
+            </div>
+            <div style={{ flex: 1 }}>
+              <SectionLabel tokens={tokens}>{selected.day === 'Today' ? 'Selected workout' : `${selected.day} workout`}</SectionLabel>
+              <div style={{ marginTop: 5, fontSize: 15, fontWeight: 700, color: tokens.ink }}>{selected.title}</div>
+              <div style={{ marginTop: 3, fontSize: 12.5, color: tokens.muted, lineHeight: 1.45 }}>{selected.detail}</div>
+            </div>
+          </div>
+          <div style={{ marginTop: 12, padding: 12, borderRadius: tokens.radiusSm, background: tokens.surfaceAlt, border: `1px solid ${tokens.lineSoft}` }}>
+            <div style={{ fontSize: 12.5, fontWeight: 650, color: tokens.ink }}>
+              {selectedIsStrength ? 'Manual strength metrics' : selectedIsWatch ? 'Captured by Apple Watch' : 'Coach guidance'}
+            </div>
+            <div style={{ marginTop: 3, fontSize: 12, color: tokens.muted, lineHeight: 1.45 }}>
+              {selectedIsStrength
+                ? 'Log load, reps, sets, and RPE. Heart rate and duration can still come from the watch.'
+                : selectedIsWatch
+                  ? 'Distance, pace, heart rate, route, splits, and duration will be captured automatically where applicable.'
+                  : 'No metrics needed. Keep it easy and treat it as recovery.'}
+            </div>
+          </div>
+          {selectedIsStrength && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+              {strengthSets.slice(0, 2).map((s) => (
+                <div key={s.lift} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: tokens.surface, borderRadius: tokens.radiusSm, border: `1px solid ${tokens.lineSoft}` }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 650, color: tokens.ink }}>{s.lift}</div>
+                    <div style={{ fontSize: 11, color: tokens.muted }}>{s.target}</div>
+                  </div>
+                  <div style={{ fontSize: 11.5, fontWeight: 650, color: tokens.ink }}>{s.load}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       <div style={{ padding: '12px 20px 14px', background: tokens.bg, borderTop: `1px solid ${tokens.lineSoft}` }}>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn tokens={tokens} primary icon="arrow-right" size="lg" style={{ flex: 1 }}>Send to Strava</Btn>
+          <Btn tokens={tokens} primary icon="apple" size="lg" style={{ flex: 1 }}>Start on Watch</Btn>
           <Btn tokens={tokens} size="lg" icon="calendar">Schedule</Btn>
         </div>
       </div>
+      <CoachDock tokens={tokens} context="plan" collapsed={coachCollapsed} onCollapseChange={setCoachCollapsed}/>
+      {onTab && <window.CoachTabBar tokens={tokens} active={active} onChange={onTab}/>}
     </div>
   );
 }
@@ -384,7 +521,10 @@ function HistoryScreen({ tokens, persona, onTab, active = 'history' }) {
           ))}
         </div>
       </div>
-      <TabBar tokens={tokens} active={active} onChange={onTab}/>
+      <CoachDock tokens={tokens} context="history"/>
+      {window.CoachTabBar
+        ? <window.CoachTabBar tokens={tokens} active={active} onChange={onTab}/>
+        : <TabBar tokens={tokens} active={active} onChange={onTab}/>}
     </div>
   );
 }
