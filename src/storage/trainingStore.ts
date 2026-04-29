@@ -2611,7 +2611,8 @@ function deriveRecommendation(
       : undefined;
 
   let readiness = 56;
-  const signals: string[] = [];
+  const readinessSignals: string[] = [];
+  const contextSignals: string[] = [];
   const freshnessGaps = recommendationFreshnessGaps(sourceFreshness);
   const trainingLoadBoundary =
     recommendationBoundaryForTrainingLoad(trainingLoad);
@@ -2619,15 +2620,17 @@ function deriveRecommendation(
   if (current.sleepSeconds != null) {
     if (sleepHours >= 7.5) {
       readiness += 18;
-      signals.push(`sleep was ${formatDuration(current.sleepSeconds)}`);
+      readinessSignals.push(
+        `sleep was ${formatDuration(current.sleepSeconds)}`,
+      );
     } else if (sleepHours >= 6.5) {
       readiness += 8;
-      signals.push(
+      readinessSignals.push(
         `sleep was adequate at ${formatDuration(current.sleepSeconds)}`,
       );
     } else if (sleepHours < 5.75) {
       readiness -= 20;
-      signals.push(
+      readinessSignals.push(
         `sleep was short at ${formatDuration(current.sleepSeconds)}`,
       );
     }
@@ -2636,12 +2639,12 @@ function deriveRecommendation(
   if (hrvDelta != null) {
     if (hrvDelta > 8) {
       readiness += 16;
-      signals.push(
+      readinessSignals.push(
         `${hrvMethodLabel(current.hrvMethod)} HRV is up ${Math.round(hrvDelta)} ms`,
       );
     } else if (hrvDelta < -8) {
       readiness -= 22;
-      signals.push(
+      readinessSignals.push(
         `${hrvMethodLabel(current.hrvMethod)} HRV is down ${Math.abs(Math.round(hrvDelta))} ms`,
       );
     }
@@ -2649,14 +2652,14 @@ function deriveRecommendation(
     current.hrvLastNightAvg != null &&
     hrvBaseline.status === "method_incompatible"
   ) {
-    signals.push(
+    contextSignals.push(
       `${hrvMethodLabel(current.hrvMethod)} HRV is available, but incompatible HRV history was ignored`,
     );
   } else if (
     current.hrvLastNightAvg != null &&
     hrvBaseline.status === "insufficient_baseline"
   ) {
-    signals.push(
+    contextSignals.push(
       `${hrvMethodLabel(current.hrvMethod)} HRV needs more matching history`,
     );
   }
@@ -2664,16 +2667,18 @@ function deriveRecommendation(
   if (rhrDelta != null) {
     if (rhrDelta <= -3) {
       readiness += 8;
-      signals.push(`resting HR is down ${Math.abs(Math.round(rhrDelta))} bpm`);
+      readinessSignals.push(
+        `resting HR is down ${Math.abs(Math.round(rhrDelta))} bpm`,
+      );
     } else if (rhrDelta >= 6) {
       readiness -= 18;
-      signals.push(`resting HR is up ${Math.round(rhrDelta)} bpm`);
+      readinessSignals.push(`resting HR is up ${Math.round(rhrDelta)} bpm`);
     }
   }
 
   if ((current.activityElapsedSeconds ?? 0) > 5400) {
     readiness -= 8;
-    signals.push("you already logged a long session today");
+    readinessSignals.push("you already logged a long session today");
   }
 
   if (freshnessGaps.length) {
@@ -2682,37 +2687,59 @@ function deriveRecommendation(
       (gap) => `${gap.label.toLowerCase()} is ${gap.state}`,
     );
     readiness -= sourceFreshnessPenalty(freshnessGaps);
-    signals.push(`${labels.join(" and ")}, so this call is conservative`);
+    contextSignals.push(
+      `${labels.join(" and ")}, so this call is conservative`,
+    );
   }
 
   if (!trainingLoadBoundary.canUseTrainingLoad) {
-    signals.push(trainingLoadBoundary.recommendationNote);
+    contextSignals.push(trainingLoadBoundary.recommendationNote);
   }
 
   readiness = Math.max(20, Math.min(96, Math.round(readiness)));
 
-  if (!signals.length) {
-    signals.push(
+  if (!readinessSignals.length && !contextSignals.length) {
+    contextSignals.push(
       "Health Connect has partial data, so this is a conservative call",
     );
   }
 
   const readinessStatus = buildReadinessStatus({
     score: readiness,
-    signalsUsed: signals,
+    signalsUsed: readinessSignals,
     sourceFreshness,
   });
+  const coachSignals = readinessSignals.length
+    ? [...readinessSignals, ...contextSignals]
+    : contextSignals.length
+      ? contextSignals
+      : [readinessStatus.ui.reason];
+
+  if (readinessStatus.status === "unknown") {
+    return {
+      readiness: readinessStatus.score,
+      readinessStatus,
+      readinessLabel: readinessStatus.ui.label,
+      color: readinessStatus.ui.color,
+      title: "Easy walk + mobility",
+      detail: "20-30 min easy movement · optional mobility",
+      reason: `${coachSignals.join(", ")}. Readiness is unknown, so today's call stays conservative.`,
+      opener: `Readiness is unknown. ${coachSignals.join(", ")}. I would keep this easy until the recovery picture is clearer.`,
+      strain: 4,
+      strainTarget: "3-5",
+    };
+  }
 
   if (readinessStatus.status === "red") {
     return {
-      readiness,
+      readiness: readinessStatus.score,
       readinessStatus,
       readinessLabel: readinessStatus.ui.label,
       color: readinessStatus.ui.color,
       title: "Easy walk + mobility",
       detail: "30 min Z1 walk · 10 min hips and calves",
-      reason: `${signals.join(", ")}. Pushing hard today would reduce the odds of stacking the next session well.`,
-      opener: `Honest check-in: ${signals.join(", ")}. I would keep this soft and earn tomorrow.`,
+      reason: `${coachSignals.join(", ")}. Pushing hard today would reduce the odds of stacking the next session well.`,
+      opener: `Honest check-in: ${coachSignals.join(", ")}. I would keep this soft and earn tomorrow.`,
       strain: 5.5,
       strainTarget: "4-7",
     };
@@ -2720,28 +2747,28 @@ function deriveRecommendation(
 
   if (readinessStatus.status === "green" && (current.workoutCount ?? 0) === 0) {
     return {
-      readiness,
+      readiness: readinessStatus.score,
       readinessStatus,
       readinessLabel: readinessStatus.ui.label,
       color: readinessStatus.ui.color,
       title: "Quality run",
       detail: "10 min easy · 4 x 5 min strong · cool down",
-      reason: `${signals.join(", ")}. Current recovery supports a harder aerobic stimulus.`,
-      opener: `You're primed. ${signals.join(", ")}. If you were waiting for a green light, this is it.`,
+      reason: `${coachSignals.join(", ")}. Current recovery supports a harder aerobic stimulus.`,
+      opener: `You're primed. ${coachSignals.join(", ")}. If you were waiting for a green light, this is it.`,
       strain: 13.5,
       strainTarget: "12-15",
     };
   }
 
   return {
-    readiness,
+    readiness: readinessStatus.score,
     readinessStatus,
     readinessLabel: readinessStatus.ui.label,
     color: readinessStatus.ui.color,
     title: "Aerobic base",
     detail: "45 min easy run or ride · stay conversational",
-    reason: `${signals.join(", ")}. This is a good day to add durable aerobic volume without forcing intensity.`,
-    opener: `Solid baseline today. ${signals.join(", ")}. Stack the work and keep it controlled.`,
+    reason: `${coachSignals.join(", ")}. This is a good day to add durable aerobic volume without forcing intensity.`,
+    opener: `Solid baseline today. ${coachSignals.join(", ")}. Stack the work and keep it controlled.`,
     strain: 9.5,
     strainTarget: "8-11",
   };

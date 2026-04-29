@@ -57,9 +57,10 @@ function confidenceFor(
 
 function baseStatus(
   score: number | null,
+  hasUsableReadinessSignals: boolean,
   hasStaleOrMissingSignals: boolean,
 ): ReadinessStatusValue {
-  if (score == null) {
+  if (score == null || !hasUsableReadinessSignals) {
     return "unknown";
   }
 
@@ -76,10 +77,15 @@ function baseStatus(
 
 function adjustmentReason(
   status: ReadinessStatusValue,
+  hasUsableReadinessSignals: boolean,
   staleSignalsIgnored: string[],
   missingSignals: string[],
 ): string | null {
   if (status === "unknown") {
+    if (!hasUsableReadinessSignals) {
+      return "Unknown readiness is treated conservatively until enough usable recovery signals are available.";
+    }
+
     return "Unknown readiness is treated conservatively until enough current recovery data is available.";
   }
 
@@ -152,20 +158,35 @@ export function buildReadinessStatus({
   const missingSignals = relevantGaps
     .filter((signal) => signal.state === "missing")
     .map(signalLabel);
+  const ignoredSignalLabels = new Set([
+    ...staleSignalsIgnored,
+    ...missingSignals,
+  ]);
+  const usableSignals = signalsUsed.filter(
+    (signal) => !ignoredSignalLabels.has(signal),
+  );
+  const hasUsableReadinessSignals = usableSignals.length > 0;
+  const contractScore = hasUsableReadinessSignals ? score : null;
   const status = baseStatus(
-    score,
+    contractScore,
+    hasUsableReadinessSignals,
     Boolean(staleSignalsIgnored.length || missingSignals.length),
   );
 
   return {
     status,
-    confidence: confidenceFor(score, staleSignalsIgnored, missingSignals),
-    score,
-    signalsUsed,
+    confidence: confidenceFor(
+      contractScore,
+      staleSignalsIgnored,
+      missingSignals,
+    ),
+    score: contractScore,
+    signalsUsed: usableSignals,
     staleSignalsIgnored,
     missingSignals,
     conservativeAdjustmentReason: adjustmentReason(
       status,
+      hasUsableReadinessSignals,
       staleSignalsIgnored,
       missingSignals,
     ),

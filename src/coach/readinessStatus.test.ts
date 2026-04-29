@@ -6,7 +6,8 @@ function freshness(
   state: SourceFreshness["state"],
 ): SourceFreshness {
   return {
-    domain: "sleep",
+    domain:
+      label === "HRV" ? "hrv" : label === "Resting HR" ? "resting_hr" : "sleep",
     label,
     state,
     canonicalTypes: ["sleep_session"],
@@ -96,5 +97,41 @@ describe("readiness status contract", () => {
     expect(status.ui.label).toBe("Unknown");
     expect(status.ui.color).toBe("warm");
     expect(status.ui.detail).toMatch(/easy/i);
+  });
+
+  it("treats partial synced data with no usable readiness signals as unknown", () => {
+    const status = buildReadinessStatus({
+      score: 56,
+      signalsUsed: [],
+      sourceFreshness: [
+        freshness("Sleep", "partial"),
+        freshness("HRV", "missing"),
+      ],
+    });
+
+    expect(status.status).toBe("unknown");
+    expect(status.score).toBeNull();
+    expect(status.confidence).toBeLessThanOrEqual(0.25);
+    expect(status.signalsUsed).toEqual([]);
+    expect(status.conservativeAdjustmentReason).toMatch(/enough usable/i);
+  });
+
+  it("does not report stale or missing freshness explanations as used signals", () => {
+    const status = buildReadinessStatus({
+      score: 68,
+      signalsUsed: [
+        "sleep was adequate at 6h 50m",
+        "Sleep is stale",
+        "HRV is missing",
+      ],
+      sourceFreshness: [
+        freshness("Sleep", "stale"),
+        freshness("HRV", "missing"),
+      ],
+    });
+
+    expect(status.signalsUsed).toEqual(["sleep was adequate at 6h 50m"]);
+    expect(status.staleSignalsIgnored).toEqual(["Sleep is stale"]);
+    expect(status.missingSignals).toEqual(["HRV is missing"]);
   });
 });
