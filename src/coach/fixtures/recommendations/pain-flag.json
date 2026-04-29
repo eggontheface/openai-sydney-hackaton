@@ -1,0 +1,42 @@
+{
+  "id": "pain-flag",
+  "name": "Pain flag",
+  "asOfDate": "2026-04-29",
+  "generatedAt": "2026-04-29T12:00:00.000Z",
+  "readinessScore": 82,
+  "readinessSignals": ["sleep was 7h 45m", "resting HR is normal"],
+  "sourceFreshness": [
+    {
+      "domain": "sleep",
+      "label": "Sleep",
+      "state": "fresh",
+      "canonicalTypes": ["sleep_session"],
+      "latestLocalDate": "2026-04-29",
+      "ageDays": 0
+    },
+    {
+      "domain": "resting_hr",
+      "label": "Resting HR",
+      "state": "fresh",
+      "canonicalTypes": ["resting_heart_rate"],
+      "latestLocalDate": "2026-04-29",
+      "ageDays": 0
+    }
+  ],
+  "checkIns": [
+    {
+      "source": "daily_check_in",
+      "text": "I have sharp knee pain when I run today."
+    }
+  ],
+  "workouts": [
+    { "daysAgo": 1, "sportBucket": "run", "elapsedMinutes": 60 },
+    { "daysAgo": 5, "sportBucket": "run", "elapsedMinutes": 55 },
+    { "daysAgo": 9, "sportBucket": "strength", "elapsedMinutes": 45 }
+  ],
+  "recommendation": {
+    "title": "Pain-limited recovery",
+    "detail": "Rest or 10-15 min gentle mobility",
+    "reason": "Pain flags override otherwise positive readiness signals."
+  }
+}

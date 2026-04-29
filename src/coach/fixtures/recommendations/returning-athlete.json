@@ -1,0 +1,42 @@
+{
+  "id": "returning-athlete",
+  "name": "Returning athlete",
+  "asOfDate": "2026-04-29",
+  "generatedAt": "2026-04-29T12:00:00.000Z",
+  "readinessScore": 72,
+  "readinessSignals": ["sleep was 7h 05m", "resting HR is stable"],
+  "sourceFreshness": [
+    {
+      "domain": "sleep",
+      "label": "Sleep",
+      "state": "fresh",
+      "canonicalTypes": ["sleep_session"],
+      "latestLocalDate": "2026-04-29",
+      "ageDays": 0
+    },
+    {
+      "domain": "resting_hr",
+      "label": "Resting HR",
+      "state": "fresh",
+      "canonicalTypes": ["resting_heart_rate"],
+      "latestLocalDate": "2026-04-29",
+      "ageDays": 0
+    }
+  ],
+  "checkIns": [
+    {
+      "source": "goal_profile",
+      "text": "I am returning after a long break and want to rebuild."
+    }
+  ],
+  "workouts": [
+    { "daysAgo": 2, "sportBucket": "run", "elapsedMinutes": 28 },
+    { "daysAgo": 50, "sportBucket": "run", "elapsedMinutes": 45 },
+    { "daysAgo": 65, "sportBucket": "strength", "elapsedMinutes": 50 }
+  ],
+  "recommendation": {
+    "title": "Return-to-training base",
+    "detail": "20-30 min easy run-walk",
+    "reason": "A recent restart after a long gap calls for baseline building."
+  }
+}

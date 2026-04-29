@@ -1,0 +1,47 @@
+{
+  "id": "poor-sleep",
+  "name": "Poor sleep",
+  "asOfDate": "2026-04-29",
+  "generatedAt": "2026-04-29T12:00:00.000Z",
+  "readinessScore": 42,
+  "readinessSignals": ["sleep was short at 4h 55m", "resting HR is up 8 bpm"],
+  "sourceFreshness": [
+    {
+      "domain": "sleep",
+      "label": "Sleep",
+      "state": "fresh",
+      "canonicalTypes": ["sleep_session"],
+      "latestLocalDate": "2026-04-29",
+      "ageDays": 0
+    },
+    {
+      "domain": "resting_hr",
+      "label": "Resting HR",
+      "state": "fresh",
+      "canonicalTypes": ["resting_heart_rate"],
+      "latestLocalDate": "2026-04-29",
+      "ageDays": 0
+    },
+    {
+      "domain": "hrv",
+      "label": "HRV",
+      "state": "fresh",
+      "canonicalTypes": ["hrv_rmssd"],
+      "latestLocalDate": "2026-04-29",
+      "ageDays": 0
+    }
+  ],
+  "checkIns": [
+    { "source": "daily_check_in", "text": "Poor sleep and heavy legs today." }
+  ],
+  "workouts": [
+    { "daysAgo": 1, "sportBucket": "run", "elapsedMinutes": 50 },
+    { "daysAgo": 4, "sportBucket": "run", "elapsedMinutes": 45 },
+    { "daysAgo": 7, "sportBucket": "strength", "elapsedMinutes": 40 }
+  ],
+  "recommendation": {
+    "title": "Recovery aerobic only",
+    "detail": "20-30 min very easy movement",
+    "reason": "Short sleep and elevated resting heart rate point toward backing off."
+  }
+}

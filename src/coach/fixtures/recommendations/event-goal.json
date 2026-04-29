@@ -1,0 +1,58 @@
+{
+  "id": "event-goal",
+  "name": "Event goal",
+  "asOfDate": "2026-04-29",
+  "generatedAt": "2026-04-29T12:00:00.000Z",
+  "readinessScore": 80,
+  "readinessSignals": [
+    "sleep was 7h 50m",
+    "HRV is above baseline",
+    "recent workouts are consistent"
+  ],
+  "sourceFreshness": [
+    {
+      "domain": "sleep",
+      "label": "Sleep",
+      "state": "fresh",
+      "canonicalTypes": ["sleep_session"],
+      "latestLocalDate": "2026-04-29",
+      "ageDays": 0
+    },
+    {
+      "domain": "hrv",
+      "label": "HRV",
+      "state": "fresh",
+      "canonicalTypes": ["hrv_rmssd"],
+      "latestLocalDate": "2026-04-29",
+      "ageDays": 0
+    },
+    {
+      "domain": "workouts",
+      "label": "Workouts",
+      "state": "fresh",
+      "canonicalTypes": ["workout"],
+      "latestLocalDate": "2026-04-28",
+      "ageDays": 1
+    }
+  ],
+  "checkIns": [
+    { "source": "goal_profile", "text": "Training for a 10K race in May." }
+  ],
+  "event": {
+    "name": "Sydney 10K",
+    "date": "2026-05-24",
+    "type": "race",
+    "distance": "10K"
+  },
+  "workouts": [
+    { "daysAgo": 1, "sportBucket": "run", "elapsedMinutes": 55 },
+    { "daysAgo": 4, "sportBucket": "run", "elapsedMinutes": 62 },
+    { "daysAgo": 8, "sportBucket": "strength", "elapsedMinutes": 45 },
+    { "daysAgo": 12, "sportBucket": "run", "elapsedMinutes": 58 }
+  ],
+  "recommendation": {
+    "title": "Event-specific aerobic session",
+    "detail": "35-45 min easy with relaxed strides",
+    "reason": "The event goal can shape the session while readiness remains the main safety gate."
+  }
+}
