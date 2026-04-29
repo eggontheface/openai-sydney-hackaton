@@ -713,12 +713,14 @@ function CoachScreen({
           <TextInput
             accessibilityLabel="Ask your coach"
             autoCorrect
+            cursorColor={tokens.ink}
             editable={hasOpenAiApiKey && !coachBusy}
             onChangeText={onChangeCoachDraft}
             onSubmitEditing={() => onSendCoachMessage()}
             placeholder={composerPlaceholder}
             placeholderTextColor={tokens.muted}
             returnKeyType="send"
+            selectionColor={tokens.ink}
             style={styles.composerTextInput}
             value={coachDraft}
           />
@@ -896,7 +898,12 @@ function CoachDock({ plan }: { plan: TrainingPlan }) {
   return (
     <View style={styles.coachDock}>
       {messages.length ? (
-        <View style={styles.coachDockMessages}>
+        <ScrollView
+          contentContainerStyle={styles.coachDockMessages}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          style={styles.coachDockMessagesScroll}
+        >
           {messages.slice(-4).map((message) => (
             <View
               key={message.id}
@@ -915,16 +922,18 @@ function CoachDock({ plan }: { plan: TrainingPlan }) {
               </Text>
             </View>
           ))}
-        </View>
+        </ScrollView>
       ) : null}
       <View style={styles.coachDockInputRow}>
         <Sparkles color={tokens.ink} size={15} strokeWidth={2} />
         <TextInput
+          cursorColor={tokens.ink}
           onChangeText={setDraft}
           onSubmitEditing={send}
           placeholder="Ask about today or the week..."
           placeholderTextColor={tokens.muted}
           returnKeyType="send"
+          selectionColor={tokens.ink}
           style={styles.coachDockInput}
           value={draft}
         />
@@ -2486,16 +2495,19 @@ const styles = StyleSheet.create({
     color: tokens.ink,
     flex: 1,
     fontSize: 14,
-    minHeight: 42,
+    height: 42,
     justifyContent: 'center',
     paddingHorizontal: 14,
   },
   composerTextInput: {
     color: tokens.ink,
+    flex: 1,
     fontSize: 14,
+    includeFontPadding: false,
+    height: 40,
     letterSpacing: 0,
-    minHeight: 42,
     paddingVertical: 0,
+    textAlignVertical: 'center',
   },
   sendButton: {
     alignItems: 'center',
@@ -2778,6 +2790,9 @@ const styles = StyleSheet.create({
   coachDockMessages: {
     gap: 7,
   },
+  coachDockMessagesScroll: {
+    maxHeight: 160,
+  },
   coachDockMessage: {
     alignSelf: 'flex-start',
     backgroundColor: tokens.surfaceAlt,
@@ -2811,6 +2826,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     flexDirection: 'row',
     gap: 8,
+    height: 44,
     paddingLeft: 12,
     paddingRight: 4,
   },
@@ -2820,8 +2836,12 @@ const styles = StyleSheet.create({
     color: tokens.ink,
     flex: 1,
     fontSize: 14,
-    minHeight: 42,
+    includeFontPadding: false,
+    height: 42,
+    lineHeight: 18,
     paddingHorizontal: 0,
+    paddingVertical: 0,
+    textAlignVertical: 'center',
   },
   coachDockSend: {
     alignItems: 'center',
