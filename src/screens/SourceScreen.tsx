@@ -266,8 +266,8 @@ export function SourceScreen({
       ? 'Saved on this device'
       : appSettings.openAiApiKeySource === 'local_storage'
         ? 'Saved in browser local storage'
-      : appSettings.openAiApiKeySource === 'env'
-        ? 'Loaded from .env'
+      : appSettings.openAiApiKeySource === 'embedded'
+        ? 'Using bundled demo key'
         : 'Not saved';
   const apiKeyPlaceholder = appSettings.hasOpenAiApiKey ? 'Replace active key' : 'sk-...';
   const diagnosticFocus: CanonicalType[] = [

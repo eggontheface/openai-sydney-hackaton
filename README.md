@@ -40,6 +40,33 @@ npm run android
 
 Use a physical device with Apple Health or Health Connect data. Android requires Health Connect to be installed or available through the Android system provider.
 
+### Demo OpenAI API Key Fallback
+
+For local demos only, you can embed an OpenAI API key into the local app bundle as a fallback. A user-saved BYO key still takes priority.
+
+Create `.env.local` from `.env.example` and set:
+
+```sh
+LOCAL_EMBED_OPENAI_KEY=1
+OPENAI_API_KEY=sk-your-demo-key
+```
+
+Then run the app through the npm scripts:
+
+```sh
+npm run ios
+# or
+npm run android
+```
+
+The npm hooks run `npm run generate:local-openai-key` before local starts/builds. That command writes `src/config/localOpenAiApiKey.generated.ts`, which is ignored by git. If you build directly with Xcode or Gradle, run the generator first:
+
+```sh
+npm run generate:local-openai-key
+```
+
+The generated key is bundled into the app, so rebuild the native app after changing `.env.local`. The app uses a saved BYO key first and falls back to the bundled demo key only when no user key is saved.
+
 ## Test
 
 The app uses Jest with the Expo preset so data, coach, and UI work can share one test runner.

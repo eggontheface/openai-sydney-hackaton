@@ -42,7 +42,7 @@ You are collaborating with multiple developers and need to move fast. Favor smal
 - Use `npm run start:dev-client -- --localhost -c` with a previously installed dev build when testing native device behavior over USB. Run `adb reverse tcp:8081 tcp:8081` first when the Android device cannot reach the Mac over LAN.
 - Build or reinstall the Android dev client with `npx expo run:android` when native dependencies, app config, permissions, or package names change. A JS reload is not enough for those changes.
 - If `npx expo run:android` cannot find Java or the Android SDK, set `JAVA_HOME`, `ANDROID_HOME`, and `ANDROID_SDK_ROOT` locally. `android/local.properties` may point at the local SDK path and must stay uncommitted.
-- OpenAI API keys from `.env` must use `EXPO_PUBLIC_OPENAI_API_KEY`. Restart Metro with `-c` after changing `.env`; otherwise the running bundle may still see the old environment.
+- Local demo OpenAI API fallback keys use `.env.local` with `LOCAL_EMBED_OPENAI_KEY=1` and `OPENAI_API_KEY=...`, then `npm run generate:local-openai-key`. The generated `src/config/localOpenAiApiKey.generated.ts` must stay uncommitted.
 - If the app shows an Expo Go native-module error, rebuild/open the dev client app instead of Expo Go. The URL should use the app scheme dev-client route, not the generic Expo Go experience.
 
 ## Verification
