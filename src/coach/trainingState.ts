@@ -118,6 +118,31 @@ function longestGapDays(workouts: readonly WorkoutRecord[]): number | null {
   }, 0);
 }
 
+function gapBeforeRecentBlockDays(
+  workouts: readonly WorkoutRecord[],
+  recentDates: readonly string[],
+): number | null {
+  if (!recentDates.length) {
+    return null;
+  }
+
+  const recentBlockStart = recentDates[0];
+  const previousDates = [
+    ...new Set(
+      workouts
+        .map((workout) => workout.localDate)
+        .filter((date) => date < recentBlockStart),
+    ),
+  ].sort();
+  const previousDate = previousDates[previousDates.length - 1];
+
+  if (!previousDate) {
+    return null;
+  }
+
+  return daysBetween(previousDate, recentBlockStart);
+}
+
 function hasPattern(
   checkIns: readonly TrainingStateCheckIn[],
   patterns: readonly RegExp[],
@@ -182,6 +207,10 @@ export function classifyTrainingState(
     totalMinutesWithinDays(workouts, input.asOfDate, 30),
   );
   const longestGap = longestGapDays(workouts);
+  const gapBeforeRecentBlock = gapBeforeRecentBlockDays(
+    workouts,
+    activeDatesLast30,
+  );
   const signalsUsed: string[] = [];
 
   if (workouts.length) {
@@ -236,11 +265,15 @@ export function classifyTrainingState(
     );
   }
 
-  if (longestGap !== null && longestGap >= 35 && activeDaysLast30 > 0) {
+  if (
+    gapBeforeRecentBlock !== null &&
+    gapBeforeRecentBlock >= 35 &&
+    activeDaysLast30 <= 2
+  ) {
     return buildClassification(
       "returning_after_extended_gap",
       0.8,
-      `Recent workouts resumed after an extended ${longestGap}-day training gap, so baseline-building behavior is recommended.`,
+      `Recent workouts resumed after an extended ${gapBeforeRecentBlock}-day training gap, so baseline-building behavior is recommended.`,
       "baseline_building",
       activeDaysLast30,
       totalWorkoutMinutesLast30,

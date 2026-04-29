@@ -119,6 +119,25 @@ describe("training state classifier", () => {
     expect(state.recommendedBehavior).toBe("normal_progression");
   });
 
+  it("classifies a currently consistent athlete with an old historical gap by recent training", () => {
+    const state = classifyTrainingState({
+      asOfDate,
+      workouts: [
+        workout(1, { elapsedSeconds: 75 * 60 }),
+        workout(4, { elapsedSeconds: 80 * 60 }),
+        workout(7, { elapsedSeconds: 90 * 60 }),
+        workout(10, { elapsedSeconds: 70 * 60 }),
+        workout(14, { elapsedSeconds: 85 * 60 }),
+        workout(18, { elapsedSeconds: 95 * 60 }),
+        workout(100, { elapsedSeconds: 45 * 60 }),
+      ],
+    });
+
+    expect(state.state).toBe("advanced_athlete");
+    expect(state.baselineBuildingRecommended).toBe(false);
+    expect(state.recommendedBehavior).toBe("normal_progression");
+  });
+
   it("classifies blocking risk flags as currently limited even with advanced recent activity", () => {
     const state = classifyTrainingState({
       asOfDate,
