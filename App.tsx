@@ -1437,10 +1437,7 @@ function SourceFreshnessRow({ source }: { source: SourceFreshness }) {
     source.lastUpdatedAt ? `Updated ${formatShortDateTime(source.lastUpdatedAt)}` : null,
     source.sampleCount ? `${formatNumber(source.sampleCount)} rows` : null,
   ].filter(Boolean);
-  const fallbackDetail = detailParts.length
-    ? detailParts.join(' · ')
-    : 'No status detail available';
-  const detail = source.limitations[0] ?? fallbackDetail;
+  const detail = [...detailParts, ...source.limitations].join(' · ') || 'No status detail available';
 
   return (
     <View style={styles.diagnosticRow}>

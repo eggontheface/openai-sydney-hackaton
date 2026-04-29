@@ -222,6 +222,7 @@ export type CoachHealthContext = {
     };
   };
   metricAvailability: MetricAvailability[];
+  sourceFreshness: SourceFreshness[];
   latestSamplesByType: {
     canonicalType: CanonicalType;
     recordType: string;
@@ -1947,6 +1948,7 @@ export async function getCoachHealthContext({
     latestSamples,
     dailyRows,
     workoutRows,
+    sourceFreshness,
   ] = await Promise.all([
     db.getFirstAsync<TableCountRow>(`
       SELECT COUNT(*) AS total, MIN(local_date) AS first_date, MAX(local_date) AS latest_date
@@ -2008,6 +2010,7 @@ export async function getCoachHealthContext({
       LIMIT 14
     `),
     db.getAllAsync<WorkoutRow>('SELECT * FROM workouts ORDER BY start_at DESC'),
+    getSourceFreshness(db),
   ]);
 
   const healthSampleCount = Number(healthSamples?.total ?? 0);
@@ -2049,6 +2052,7 @@ export async function getCoachHealthContext({
       },
     },
     metricAvailability,
+    sourceFreshness,
     latestSamplesByType: latestSamples.map((sample) => ({
       canonicalType: sample.canonical_type,
       recordType: sample.record_type,
