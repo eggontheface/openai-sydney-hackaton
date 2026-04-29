@@ -128,6 +128,24 @@ type LatestSampleByTypeRow = {
   unit: string | null;
 };
 
+type SourceValueRow = {
+  source_key: string | null;
+  value: number | null;
+  sample_count: number;
+  latest_end_at: string | null;
+  source_is_combined: number;
+};
+
+type SleepRollupRow = {
+  source_key: string | null;
+  sleep_seconds: number | null;
+  time_in_bed_seconds: number | null;
+  sleep_efficiency: number | null;
+  session_count: number;
+  source_days: number | null;
+  latest_end_at: string | null;
+};
+
 type DailyMetricsRow = {
   date: string;
   data_completeness: DailyMetrics['dataCompleteness'];
@@ -691,11 +709,65 @@ export async function initTrainingStore(): Promise<void> {
   await getDb();
 }
 
+function isHealthConnectDailyAggregate(sample: HealthSample): boolean {
+  return sample.sampleId.startsWith('health_connect:daily:');
+}
+
+function sleepReplacementKey(sleep: SleepSessionRecord): string {
+  return `${sleep.platform}:${sleep.sourceApp ?? ''}:${sleep.wakeDate}`;
+}
+
 export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
   const db = await getDb();
   const importedAt = new Date().toISOString();
 
   await db.withExclusiveTransactionAsync(async (txn) => {
+    const dailyAggregateReplacements = new Map<string, HealthSample>();
+    payload.samples.forEach((sample) => {
+      if (!isHealthConnectDailyAggregate(sample)) {
+        return;
+      }
+
+      dailyAggregateReplacements.set(
+        `${sample.platform}:${sample.canonicalType}:${sample.localDate}`,
+        sample,
+      );
+    });
+
+    for (const sample of dailyAggregateReplacements.values()) {
+      await txn.runAsync(
+        `
+          DELETE FROM health_samples
+          WHERE platform = ?
+            AND canonical_type = ?
+            AND local_date = ?
+            AND sample_id LIKE 'health_connect:daily:%'
+        `,
+        sample.platform,
+        sample.canonicalType,
+        sample.localDate,
+      );
+    }
+
+    const sleepSessionReplacements = new Map<string, SleepSessionRecord>();
+    payload.sleepSessions.forEach((sleep) => {
+      sleepSessionReplacements.set(sleepReplacementKey(sleep), sleep);
+    });
+
+    for (const sleep of sleepSessionReplacements.values()) {
+      await txn.runAsync(
+        `
+          DELETE FROM sleep_sessions
+          WHERE platform = ?
+            AND COALESCE(source_app, '') = ?
+            AND wake_date = ?
+        `,
+        sleep.platform,
+        sleep.sourceApp ?? '',
+        sleep.wakeDate,
+      );
+    }
+
     for (const sample of payload.samples) {
       await txn.runAsync(
         `
@@ -913,6 +985,92 @@ async function valueFor(
   return optionalNumber(row?.value);
 }
 
+async function singleSourceSumFor(
+  db: SQLite.SQLiteDatabase,
+  date: string,
+  canonicalType: CanonicalType,
+): Promise<number | undefined> {
+  const row = await db.getFirstAsync<SourceValueRow>(
+    `
+      SELECT
+        COALESCE(NULLIF(source_app, ''), NULLIF(source_device, ''), platform || ':' || record_type)
+          AS source_key,
+        CASE
+          WHEN SUM(CASE WHEN sample_id LIKE 'health_connect:daily:%' THEN 1 ELSE 0 END) > 0
+          THEN MAX(CASE WHEN sample_id LIKE 'health_connect:daily:%' THEN value ELSE NULL END)
+          ELSE SUM(value)
+        END AS value,
+        COUNT(*) AS sample_count,
+        MAX(end_at) AS latest_end_at,
+        CASE WHEN instr(COALESCE(source_app, ''), ',') > 0 THEN 1 ELSE 0 END
+          AS source_is_combined
+      FROM health_samples
+      WHERE local_date = ? AND canonical_type = ? AND value IS NOT NULL
+      GROUP BY source_key
+      HAVING SUM(value) IS NOT NULL
+      ORDER BY source_is_combined ASC, value DESC, sample_count DESC, latest_end_at DESC, source_key ASC
+      LIMIT 1
+    `,
+    date,
+    canonicalType,
+  );
+
+  return optionalNumber(row?.value);
+}
+
+async function selectedSleepFor(
+  db: SQLite.SQLiteDatabase,
+  date: string,
+): Promise<SleepRollupRow | null> {
+  return db.getFirstAsync<SleepRollupRow>(
+    `
+      WITH source_rank AS (
+        SELECT
+          COALESCE(NULLIF(source_app, ''), platform) AS source_key,
+          COUNT(DISTINCT wake_date) AS source_days,
+          SUM(sleep_seconds) AS source_sleep_seconds
+        FROM sleep_sessions
+        GROUP BY source_key
+      ),
+      day_source AS (
+        SELECT
+          COALESCE(NULLIF(source_app, ''), platform) AS source_key,
+          SUM(sleep_seconds) AS sleep_seconds,
+          SUM(time_in_bed_seconds) AS time_in_bed_seconds,
+          CASE
+            WHEN SUM(time_in_bed_seconds) > 0
+            THEN SUM(sleep_seconds) * 1.0 / SUM(time_in_bed_seconds)
+            ELSE AVG(sleep_efficiency)
+          END AS sleep_efficiency,
+          COUNT(*) AS session_count,
+          MAX(end_at) AS latest_end_at
+        FROM sleep_sessions
+        WHERE wake_date = ?
+        GROUP BY source_key
+        HAVING SUM(sleep_seconds) > 0
+      )
+      SELECT
+        day_source.source_key,
+        day_source.sleep_seconds,
+        day_source.time_in_bed_seconds,
+        day_source.sleep_efficiency,
+        day_source.session_count,
+        source_rank.source_days,
+        day_source.latest_end_at
+      FROM day_source
+      LEFT JOIN source_rank ON source_rank.source_key = day_source.source_key
+      ORDER BY
+        source_rank.source_days DESC,
+        day_source.sleep_seconds DESC,
+        day_source.session_count DESC,
+        day_source.latest_end_at DESC,
+        day_source.source_key ASC
+      LIMIT 1
+    `,
+    date,
+  );
+}
+
 async function latestValueFor(
   db: SQLite.SQLiteDatabase,
   date: string,
@@ -942,7 +1100,7 @@ async function rebuildDailyMetrics(): Promise<void> {
   await db.execAsync('DELETE FROM daily_metrics;');
 
   for (const date of dates) {
-    const steps = await valueFor(db, date, 'steps');
+    const steps = await singleSourceSumFor(db, date, 'steps');
     const activeKcal = await valueFor(db, date, 'active_energy');
     const totalKcal = await valueFor(db, date, 'total_energy');
     const distanceMeters = await valueFor(db, date, 'distance');
@@ -951,27 +1109,12 @@ async function rebuildDailyMetrics(): Promise<void> {
     const heartRateMax = await valueFor(db, date, 'heart_rate', 'MAX');
     const restingHr = await valueFor(db, date, 'resting_heart_rate', 'AVG');
     const hrv = await valueFor(db, date, 'hrv_rmssd', 'AVG');
-    const sleepFallback = await valueFor(db, date, 'sleep_session');
+    const sleepFallback = await singleSourceSumFor(db, date, 'sleep_session');
     const weightKg = await latestValueFor(db, date, 'weight');
     const bodyFatPct = await latestValueFor(db, date, 'body_fat');
     const leanBodyMassKg = await latestValueFor(db, date, 'lean_body_mass');
     const vo2max = await latestValueFor(db, date, 'vo2max');
-
-    const sleep = await db.getFirstAsync<{
-      sleep_seconds: number | null;
-      time_in_bed_seconds: number | null;
-      sleep_efficiency: number | null;
-    }>(
-      `
-        SELECT
-          SUM(sleep_seconds) AS sleep_seconds,
-          SUM(time_in_bed_seconds) AS time_in_bed_seconds,
-          AVG(sleep_efficiency) AS sleep_efficiency
-        FROM sleep_sessions
-        WHERE wake_date = ?
-      `,
-      date,
-    );
+    const sleep = await selectedSleepFor(db, date);
 
     const workoutRows = await db.getAllAsync<WorkoutRow>(
       `
@@ -1228,7 +1371,9 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
   ] = await Promise.all([
     db.getFirstAsync<{ total: number }>('SELECT COUNT(*) AS total FROM health_samples'),
     db.getAllAsync<WorkoutRow>('SELECT * FROM workouts ORDER BY start_at ASC'),
-    db.getFirstAsync<{ total: number }>('SELECT COUNT(*) AS total FROM sleep_sessions'),
+    db.getFirstAsync<{ total: number }>(
+      'SELECT COUNT(*) AS total FROM daily_metrics WHERE has_sleep = 1',
+    ),
     db.getFirstAsync<{ total: number }>('SELECT COUNT(*) AS total FROM nutrition_daily'),
     db.getFirstAsync<{ total: number }>(
       'SELECT COUNT(*) AS total FROM daily_metrics WHERE source_count > 0',

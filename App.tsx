@@ -1146,6 +1146,13 @@ function HistoryScreen({ snapshot }: { snapshot: PipelineSnapshot }) {
           ))}
         </View>
 
+        <View style={styles.summaryGrid}>
+          <SmallMetric label="Raw samples" value={formatNumber(snapshot.totalSamples)} />
+          <SmallMetric label="Workouts" value={formatNumber(snapshot.workoutCount)} />
+          <SmallMetric label="Sleep nights" value={formatNumber(snapshot.sleepCount)} />
+          <SmallMetric label="Nutrition days" value={formatNumber(snapshot.nutritionDays)} />
+        </View>
+
         <SignalTrendChart history={snapshot.history} />
 
         <View style={styles.historyMiniGrid}>

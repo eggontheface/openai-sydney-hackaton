@@ -126,6 +126,18 @@ type NutritionNumberField =
   | 'caffeineMg'
   | 'sodiumMg';
 
+type DailyAggregateGroup = {
+  result: Record<string, any>;
+  startTime: string;
+  endTime: string;
+};
+
+type StepAggregateCandidate = {
+  group: DailyAggregateGroup;
+  sourceApp?: string;
+  value: number;
+};
+
 function recordStart(record: TimedRecord): string {
   return record.startTime ?? record.time ?? new Date().toISOString();
 }
@@ -145,10 +157,13 @@ function sourceDevice(metadata?: RecordMetadata): string | undefined {
     .trim();
 }
 
-function providerId(recordType: RecordType, record: { metadata?: RecordMetadata }, index: number) {
+function providerId(recordType: RecordType, record: TimedRecord) {
+  const start = recordStart(record);
+  const end = recordEnd(record);
+
   return (
     record.metadata?.id ??
-    `${recordType}:${record.metadata?.dataOrigin ?? 'unknown'}:${index}`
+    `${recordType}:${record.metadata?.dataOrigin ?? 'unknown'}:${start}:${end}`
   );
 }
 
@@ -245,6 +260,7 @@ async function readAllRecords<T extends RecordType>(
 async function readDailyAggregates<T extends AggregateResultRecordType>(
   recordType: T,
   range: SyncRange,
+  dataOriginFilter?: string[],
 ) {
   return withTimeout(
     aggregateGroupByDuration({
@@ -258,9 +274,145 @@ async function readDailyAggregates<T extends AggregateResultRecordType>(
         duration: 'DAYS',
         length: 1,
       },
+      dataOriginFilter,
     }),
     `${recordType} daily aggregate`,
   );
+}
+
+function aggregateDataOrigins(group: DailyAggregateGroup): string[] {
+  const origins = group.result.dataOrigins;
+  return Array.isArray(origins)
+    ? origins.filter((origin): origin is string => typeof origin === 'string' && origin.length > 0)
+    : [];
+}
+
+function aggregateStepCount(group: DailyAggregateGroup): number {
+  const value = Number(group.result.COUNT_TOTAL ?? 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function stepSourceRank(candidates: StepAggregateCandidate[]) {
+  const rank = new Map<string, { days: number; total: number }>();
+
+  candidates.forEach((candidate) => {
+    const source = candidate.sourceApp ?? 'unknown';
+    const current = rank.get(source) ?? { days: 0, total: 0 };
+    current.days += 1;
+    current.total += candidate.value;
+    rank.set(source, current);
+  });
+
+  return rank;
+}
+
+function chooseStepCandidate(
+  candidates: StepAggregateCandidate[],
+  rank: Map<string, { days: number; total: number }>,
+): StepAggregateCandidate {
+  return candidates
+    .slice()
+    .sort((left, right) => {
+      const leftRank = rank.get(left.sourceApp ?? 'unknown') ?? { days: 0, total: 0 };
+      const rightRank = rank.get(right.sourceApp ?? 'unknown') ?? { days: 0, total: 0 };
+
+      return (
+        rightRank.days - leftRank.days ||
+        rightRank.total - leftRank.total ||
+        right.value - left.value ||
+        (left.sourceApp ?? '').localeCompare(right.sourceApp ?? '')
+      );
+    })[0];
+}
+
+async function stepAggregateCandidatesByDate(
+  range: SyncRange,
+  groups: DailyAggregateGroup[],
+): Promise<{
+  candidatesByDate: Map<string, StepAggregateCandidate[]>;
+  dataOrigins: string[];
+  groupsRead: number;
+}> {
+  const dataOrigins = Array.from(new Set(groups.flatMap(aggregateDataOrigins))).sort();
+  const candidatesByDate = new Map<string, StepAggregateCandidate[]>();
+
+  if (dataOrigins.length <= 1) {
+    groups.forEach((group) => {
+      const value = aggregateStepCount(group);
+      if (!value) {
+        return;
+      }
+
+      const date = localDateKey(group.startTime);
+      candidatesByDate.set(date, [
+        ...(candidatesByDate.get(date) ?? []),
+        {
+          group,
+          sourceApp: dataOrigins[0],
+          value,
+        },
+      ]);
+    });
+
+    return { candidatesByDate, dataOrigins, groupsRead: 0 };
+  }
+
+  let groupsRead = 0;
+  for (const dataOrigin of dataOrigins) {
+    const originGroups = (await readDailyAggregates('Steps', range, [
+      dataOrigin,
+    ])) as DailyAggregateGroup[];
+    groupsRead += originGroups.length;
+
+    originGroups.forEach((group) => {
+      const value = aggregateStepCount(group);
+      if (!value) {
+        return;
+      }
+
+      const date = localDateKey(group.startTime);
+      candidatesByDate.set(date, [
+        ...(candidatesByDate.get(date) ?? []),
+        { group, sourceApp: dataOrigin, value },
+      ]);
+    });
+  }
+
+  return { candidatesByDate, dataOrigins, groupsRead };
+}
+
+function aggregateSample({
+  config,
+  group,
+  value,
+  unit,
+  sourceApp,
+  metadata,
+}: {
+  config: HealthConnectRecordConfig;
+  group: DailyAggregateGroup;
+  value?: number;
+  unit?: string;
+  sourceApp?: string;
+  metadata?: Record<string, unknown>;
+}): HealthSample {
+  return {
+    sampleId: `health_connect:daily:${config.canonicalType}:${group.startTime}`,
+    platform: 'health_connect',
+    recordType: `${config.recordType}Record`,
+    canonicalType: config.canonicalType,
+    sourceApp,
+    startAt: group.startTime,
+    endAt: group.endTime,
+    localDate: localDateKey(group.startTime),
+    value,
+    unit,
+    metadataJson: safeJsonStringify({
+      recordType: config.recordType,
+      group,
+      ...metadata,
+    }),
+  };
 }
 
 function exerciseTypeName(value?: number): string | undefined {
@@ -432,7 +584,7 @@ function finalizeNutrition(records: Map<string, NutritionAccumulator>): Nutritio
   }));
 }
 
-function parseSleepSession(record: any, index: number): SleepSessionRecord {
+function parseSleepSession(record: any): SleepSessionRecord {
   const stages = Array.isArray(record.stages) ? record.stages : [];
   const timeInBedSeconds = secondsBetween(record.startTime, record.endTime);
   let sleepSeconds = stages.length ? 0 : timeInBedSeconds;
@@ -461,7 +613,7 @@ function parseSleepSession(record: any, index: number): SleepSessionRecord {
   }
 
   return {
-    sleepId: `health_connect:sleep:${providerId('SleepSession', record, index)}`,
+    sleepId: `health_connect:sleep:${providerId('SleepSession', record)}`,
     platform: 'health_connect',
     sourceApp: record.metadata?.dataOrigin,
     startAt: record.startTime,
@@ -480,11 +632,11 @@ function parseSleepSession(record: any, index: number): SleepSessionRecord {
   };
 }
 
-function parseWorkout(record: any, index: number): WorkoutRecord {
+function parseWorkout(record: any): WorkoutRecord {
   const elapsedSeconds = secondsBetween(record.startTime, record.endTime);
 
   return {
-    workoutId: `health_connect:workout:${providerId('ExerciseSession', record, index)}`,
+    workoutId: `health_connect:workout:${providerId('ExerciseSession', record)}`,
     platform: 'health_connect',
     sourceApp: record.metadata?.dataOrigin,
     startAt: record.startTime,
@@ -589,68 +741,103 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
       const groups = await readDailyAggregates(
         config.recordType as AggregateResultRecordType,
         range,
-      );
+      ) as DailyAggregateGroup[];
+      let extraGroupsRead = 0;
+      let successMessage: string | undefined;
 
-      groups.forEach((group: any) => {
-        const result = group.result as Record<string, any>;
-        const dataOrigins = result.dataOrigins ?? group.result.dataOrigins ?? [];
-        let value: number | undefined;
-        let unit: string | undefined;
+      if (config.recordType === 'Steps') {
+        const { candidatesByDate, dataOrigins, groupsRead } = await stepAggregateCandidatesByDate(
+          range,
+          groups,
+        );
+        extraGroupsRead = groupsRead;
+        const candidates = [...candidatesByDate.values()].flat();
+        const rank = stepSourceRank(candidates);
 
-        if (config.recordType === 'Steps') {
-          value = Number(result.COUNT_TOTAL ?? 0);
-          unit = 'count';
-        } else if (config.recordType === 'ActiveCaloriesBurned') {
-          value = Number(result.ACTIVE_CALORIES_TOTAL?.inKilocalories ?? 0);
-          unit = 'kcal';
-        } else if (config.recordType === 'TotalCaloriesBurned') {
-          value = Number(result.ENERGY_TOTAL?.inKilocalories ?? 0);
-          unit = 'kcal';
-        } else if (config.recordType === 'Distance') {
-          value = Number(result.DISTANCE?.inMeters ?? 0);
-          unit = 'm';
-        } else if (config.recordType === 'HeartRate') {
-          value = Number(result.BPM_AVG ?? 0);
-          unit = 'bpm';
-          if (!value || !result.MEASUREMENTS_COUNT) {
-            return;
-          }
-        } else if (config.recordType === 'RestingHeartRate') {
-          value = Number(result.BPM_AVG ?? 0);
-          unit = 'bpm';
-          if (!value) {
-            return;
-          }
-        } else if (config.recordType === 'SleepSession') {
-          value = Number(result.SLEEP_DURATION_TOTAL ?? 0);
-          unit = 's';
-          if (!value) {
-            return;
-          }
+        [...candidatesByDate.entries()]
+          .sort(([left], [right]) => left.localeCompare(right))
+          .forEach(([, stepCandidates]) => {
+            const candidate = chooseStepCandidate(stepCandidates, rank);
+            const ignoredDataOrigins = dataOrigins.filter(
+              (origin) => origin !== candidate.sourceApp,
+            );
+
+            samples.push(
+              aggregateSample({
+                config,
+                group: candidate.group,
+                value: candidate.value,
+                unit: 'count',
+                sourceApp: candidate.sourceApp,
+                metadata: ignoredDataOrigins.length
+                  ? {
+                      selectedDataOrigin: candidate.sourceApp,
+                      ignoredDataOrigins,
+                    }
+                  : undefined,
+              }),
+            );
+            samplesWritten += 1;
+          });
+
+        if (dataOrigins.length > 1 && samplesWritten) {
+          successMessage = `Multiple step sources found; selected one source per day from ${dataOrigins.length} origins.`;
         }
+      } else {
+        groups.forEach((group) => {
+          const result = group.result;
+          const dataOrigins = aggregateDataOrigins(group);
+          let value: number | undefined;
+          let unit: string | undefined;
 
-        samples.push({
-          sampleId: `health_connect:daily:${config.canonicalType}:${group.startTime}`,
-          platform: 'health_connect',
-          recordType: `${config.recordType}Record`,
-          canonicalType: config.canonicalType,
-          sourceApp: dataOrigins.join(', '),
-          startAt: group.startTime,
-          endAt: group.endTime,
-          localDate: localDateKey(group.startTime),
-          value,
-          unit,
-          metadataJson: safeJsonStringify({ recordType: config.recordType, group }),
+          if (config.recordType === 'ActiveCaloriesBurned') {
+            value = Number(result.ACTIVE_CALORIES_TOTAL?.inKilocalories ?? 0);
+            unit = 'kcal';
+          } else if (config.recordType === 'TotalCaloriesBurned') {
+            value = Number(result.ENERGY_TOTAL?.inKilocalories ?? 0);
+            unit = 'kcal';
+          } else if (config.recordType === 'Distance') {
+            value = Number(result.DISTANCE?.inMeters ?? 0);
+            unit = 'm';
+          } else if (config.recordType === 'HeartRate') {
+            value = Number(result.BPM_AVG ?? 0);
+            unit = 'bpm';
+            if (!value || !result.MEASUREMENTS_COUNT) {
+              return;
+            }
+          } else if (config.recordType === 'RestingHeartRate') {
+            value = Number(result.BPM_AVG ?? 0);
+            unit = 'bpm';
+            if (!value) {
+              return;
+            }
+          } else if (config.recordType === 'SleepSession') {
+            value = Number(result.SLEEP_DURATION_TOTAL ?? 0);
+            unit = 's';
+            if (!value) {
+              return;
+            }
+          }
+
+          samples.push(
+            aggregateSample({
+              config,
+              group,
+              value,
+              unit,
+              sourceApp: dataOrigins.join(', '),
+            }),
+          );
+          samplesWritten += 1;
         });
-        samplesWritten += 1;
-      });
+      }
 
       updateDiagnostic(config, 'aggregate', {
-        recordsRead: groups.length,
+        recordsRead: groups.length + extraGroupsRead,
         samplesWritten,
         message:
           groups.length && samplesWritten
-            ? undefined
+            ? successMessage
             : 'Permission granted, but no aggregate data returned in range.',
       });
     } catch (error) {
@@ -681,7 +868,7 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
         const metadata = anyRecord.metadata as RecordMetadata | undefined;
 
         if (config.recordType === 'ExerciseSession') {
-          const workout = parseWorkout(anyRecord, index);
+          const workout = parseWorkout(anyRecord);
           workouts.push(workout);
           samples.push(
             healthSample({
@@ -698,7 +885,7 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
         }
 
         if (config.recordType === 'SleepSession') {
-          const session = parseSleepSession(anyRecord, index);
+          const session = parseSleepSession(anyRecord);
           sleepSessions.push(session);
           samples.push(
             healthSample({
