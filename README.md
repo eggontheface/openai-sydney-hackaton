@@ -28,17 +28,69 @@ Records are normalized into platform-neutral tables, including `health_samples`,
 
 ## Run Locally
 
-This app uses native health modules, so it will not work in Expo Go.
+This app uses native health modules, so it will not work in Expo Go. Build a native dev client with Expo instead.
+
+### Prerequisites
+
+- Node.js LTS and npm.
+- Android Studio with the Android SDK and either a running emulator or a USB-connected Android device.
+- Xcode for iOS builds.
+- Health data access requires a physical device: Apple Health on iOS or Health Connect on Android. An Android emulator is useful for checking the UI, but it will not have real Health Connect data.
+
+Check that Android can see a target before running:
+
+```sh
+adb devices
+```
+
+### First Setup
 
 ```sh
 npm install
 npm run prebuild
-npm run ios
-# or
+```
+
+`npm run android` and `npm run ios` can also create the native directories automatically if they do not exist, but running `prebuild` explicitly makes that step visible.
+
+### Android
+
+Start an emulator from Android Studio or connect a device, then run:
+
+```sh
 npm run android
 ```
 
-Use a physical device with Apple Health or Health Connect data. Android requires Health Connect to be installed or available through the Android system provider.
+For a connected physical device:
+
+```sh
+npm run android -- --device
+```
+
+Android requires Health Connect to be installed or available through the Android system provider.
+
+### iOS
+
+Run on the default simulator:
+
+```sh
+npm run ios
+```
+
+Run on a connected physical device:
+
+```sh
+npm run ios -- --device
+```
+
+### After The Native App Is Installed
+
+Start the Expo dev server for the installed dev client:
+
+```sh
+npm start
+```
+
+Re-run `npm run android` or `npm run ios` after changing native dependencies, Expo config, permissions, or config plugins.
 
 ## Native Notes
 
