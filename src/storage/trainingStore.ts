@@ -15,6 +15,8 @@ import type {
   NutritionDailyRecord,
   PipelineSnapshot,
   SleepSessionRecord,
+  SourceFreshness,
+  SourceFreshnessDomain,
   SportBucket,
   SyncPayload,
   SyncRange,
@@ -110,6 +112,18 @@ type MetricAvailabilityRow = {
   sample_count: number;
   day_count: number;
   latest_date: string | null;
+};
+
+type FreshnessStatsRow = {
+  sample_count: number | null;
+  day_count: number | null;
+  latest_date: string | null;
+  last_updated_at: string | null;
+};
+
+type FreshnessCanonicalTypeRow = {
+  canonical_type: CanonicalType;
+  sample_count: number;
 };
 
 type TableCountRow = {
@@ -240,6 +254,98 @@ type WorkoutSummary = {
   activity_elapsed_seconds: number | null;
   activity_kcal: number | null;
 };
+
+type SourceFreshnessConfig = {
+  domain: SourceFreshnessDomain;
+  label: string;
+  canonicalTypes: CanonicalType[];
+  maxFreshAgeDays: number;
+  source: 'samples' | 'sleep' | 'workouts' | 'nutrition' | 'check_ins';
+  todayIsPartial?: boolean;
+  partialWhenMissingTypes?: boolean;
+  missingLimitation: string;
+};
+
+const sourceFreshnessConfigs: SourceFreshnessConfig[] = [
+  {
+    domain: 'sleep',
+    label: 'Sleep',
+    canonicalTypes: ['sleep_session'],
+    maxFreshAgeDays: 1,
+    source: 'sleep',
+    missingLimitation: 'No imported sleep sessions are available.',
+  },
+  {
+    domain: 'workouts',
+    label: 'Workouts',
+    canonicalTypes: ['workout'],
+    maxFreshAgeDays: 7,
+    source: 'workouts',
+    missingLimitation: 'No imported workout sessions are available.',
+  },
+  {
+    domain: 'steps',
+    label: 'Steps',
+    canonicalTypes: ['steps'],
+    maxFreshAgeDays: 0,
+    source: 'samples',
+    todayIsPartial: true,
+    missingLimitation: 'No imported step samples are available.',
+  },
+  {
+    domain: 'energy',
+    label: 'Energy',
+    canonicalTypes: ['active_energy', 'total_energy'],
+    maxFreshAgeDays: 0,
+    source: 'samples',
+    todayIsPartial: true,
+    partialWhenMissingTypes: true,
+    missingLimitation: 'No imported active or total energy samples are available.',
+  },
+  {
+    domain: 'hrv',
+    label: 'HRV',
+    canonicalTypes: ['hrv_rmssd'],
+    maxFreshAgeDays: 1,
+    source: 'samples',
+    missingLimitation: 'No imported HRV samples are available.',
+  },
+  {
+    domain: 'resting_hr',
+    label: 'Resting HR',
+    canonicalTypes: ['resting_heart_rate'],
+    maxFreshAgeDays: 1,
+    source: 'samples',
+    missingLimitation: 'No imported resting heart rate samples are available.',
+  },
+  {
+    domain: 'nutrition',
+    label: 'Nutrition',
+    canonicalTypes: ['nutrition', 'hydration'],
+    maxFreshAgeDays: 1,
+    source: 'nutrition',
+    todayIsPartial: true,
+    partialWhenMissingTypes: true,
+    missingLimitation: 'No imported nutrition or hydration rows are available.',
+  },
+  {
+    domain: 'body_composition',
+    label: 'Body composition',
+    canonicalTypes: ['weight', 'body_fat', 'lean_body_mass'],
+    maxFreshAgeDays: 14,
+    source: 'samples',
+    partialWhenMissingTypes: true,
+    missingLimitation: 'No imported weight, body fat, or lean mass samples are available.',
+  },
+  {
+    domain: 'check_ins',
+    label: 'Check-ins',
+    canonicalTypes: [],
+    maxFreshAgeDays: 0,
+    source: 'check_ins',
+    missingLimitation: 'Daily check-ins are not implemented in local storage yet.',
+  },
+];
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | undefined;
 
@@ -438,6 +544,306 @@ function buildMetricAvailability(
   return [...availability.values()].sort((a, b) =>
     a.canonicalType.localeCompare(b.canonicalType),
   );
+}
+
+function canonicalTypeLabel(type: CanonicalType): string {
+  const labels: Partial<Record<CanonicalType, string>> = {
+    active_energy: 'active energy',
+    body_fat: 'body fat',
+    distance: 'distance',
+    heart_rate: 'heart rate',
+    hydration: 'hydration',
+    hrv_rmssd: 'HRV',
+    lean_body_mass: 'lean mass',
+    nutrition: 'nutrition',
+    resting_heart_rate: 'resting heart rate',
+    sleep_session: 'sleep',
+    steps: 'steps',
+    total_energy: 'total energy',
+    vo2max: 'VO2 max',
+    weight: 'weight',
+    workout: 'workouts',
+  };
+
+  return labels[type] ?? type.replace(/_/g, ' ');
+}
+
+function daysSinceLocalDate(latestDate: string | null | undefined, today: string): number | undefined {
+  if (!latestDate) {
+    return undefined;
+  }
+
+  const latestTime = new Date(`${latestDate}T12:00:00`).getTime();
+  const todayTime = new Date(`${today}T12:00:00`).getTime();
+  if (!Number.isFinite(latestTime) || !Number.isFinite(todayTime)) {
+    return undefined;
+  }
+
+  return Math.max(0, Math.floor((todayTime - latestTime) / (24 * 60 * 60 * 1000)));
+}
+
+function placeholders(values: unknown[]): string {
+  return values.map(() => '?').join(', ');
+}
+
+async function freshnessStatsForSamples(
+  db: SQLite.SQLiteDatabase,
+  canonicalTypes: CanonicalType[],
+): Promise<FreshnessStatsRow | null> {
+  if (!canonicalTypes.length) {
+    return null;
+  }
+
+  return db.getFirstAsync<FreshnessStatsRow>(
+    `
+      SELECT
+        COUNT(*) AS sample_count,
+        COUNT(DISTINCT local_date) AS day_count,
+        MAX(local_date) AS latest_date,
+        MAX(COALESCE(source_modified_at, end_at, imported_at)) AS last_updated_at
+      FROM health_samples
+      WHERE canonical_type IN (${placeholders(canonicalTypes)})
+    `,
+    ...canonicalTypes,
+  );
+}
+
+async function freshnessStatsForSleep(
+  db: SQLite.SQLiteDatabase,
+): Promise<FreshnessStatsRow | null> {
+  return db.getFirstAsync<FreshnessStatsRow>(`
+    SELECT
+      COUNT(*) AS sample_count,
+      COUNT(DISTINCT date_key) AS day_count,
+      MAX(date_key) AS latest_date,
+      MAX(updated_at) AS last_updated_at
+    FROM (
+      SELECT sleep_id AS row_id, wake_date AS date_key, COALESCE(end_at, imported_at) AS updated_at
+      FROM sleep_sessions
+      UNION ALL
+      SELECT sample_id AS row_id, local_date AS date_key, COALESCE(source_modified_at, end_at, imported_at) AS updated_at
+      FROM health_samples
+      WHERE canonical_type = 'sleep_session'
+    )
+  `);
+}
+
+async function freshnessStatsForWorkouts(
+  db: SQLite.SQLiteDatabase,
+): Promise<FreshnessStatsRow | null> {
+  return db.getFirstAsync<FreshnessStatsRow>(`
+    SELECT
+      COUNT(*) AS sample_count,
+      COUNT(DISTINCT date_key) AS day_count,
+      MAX(date_key) AS latest_date,
+      MAX(updated_at) AS last_updated_at
+    FROM (
+      SELECT workout_id AS row_id, local_date AS date_key, COALESCE(end_at, imported_at) AS updated_at
+      FROM workouts
+      UNION ALL
+      SELECT sample_id AS row_id, local_date AS date_key, COALESCE(source_modified_at, end_at, imported_at) AS updated_at
+      FROM health_samples
+      WHERE canonical_type = 'workout'
+    )
+  `);
+}
+
+async function freshnessStatsForNutrition(
+  db: SQLite.SQLiteDatabase,
+): Promise<FreshnessStatsRow | null> {
+  return db.getFirstAsync<FreshnessStatsRow>(`
+    SELECT
+      COUNT(*) AS sample_count,
+      COUNT(DISTINCT date_key) AS day_count,
+      MAX(date_key) AS latest_date,
+      MAX(updated_at) AS last_updated_at
+    FROM (
+      SELECT date AS row_id, date AS date_key, COALESCE(source_modified_at, imported_at) AS updated_at
+      FROM nutrition_daily
+      UNION ALL
+      SELECT sample_id AS row_id, local_date AS date_key, COALESCE(source_modified_at, end_at, imported_at) AS updated_at
+      FROM health_samples
+      WHERE canonical_type IN ('nutrition', 'hydration')
+    )
+  `);
+}
+
+async function freshnessStatsFor(
+  db: SQLite.SQLiteDatabase,
+  config: SourceFreshnessConfig,
+): Promise<FreshnessStatsRow | null> {
+  if (config.source === 'sleep') {
+    return freshnessStatsForSleep(db);
+  }
+
+  if (config.source === 'workouts') {
+    return freshnessStatsForWorkouts(db);
+  }
+
+  if (config.source === 'nutrition') {
+    return freshnessStatsForNutrition(db);
+  }
+
+  if (config.source === 'check_ins') {
+    return null;
+  }
+
+  return freshnessStatsForSamples(db, config.canonicalTypes);
+}
+
+async function presentCanonicalTypesFor(
+  db: SQLite.SQLiteDatabase,
+  canonicalTypes: CanonicalType[],
+): Promise<Set<CanonicalType>> {
+  if (!canonicalTypes.length) {
+    return new Set();
+  }
+
+  const rows = await db.getAllAsync<FreshnessCanonicalTypeRow>(
+    `
+      SELECT canonical_type, COUNT(*) AS sample_count
+      FROM health_samples
+      WHERE canonical_type IN (${placeholders(canonicalTypes)})
+      GROUP BY canonical_type
+    `,
+    ...canonicalTypes,
+  );
+
+  return new Set(rows.filter((row) => Number(row.sample_count) > 0).map((row) => row.canonical_type));
+}
+
+function buildFreshnessLimitations({
+  config,
+  diagnostics,
+  missingTypes,
+  sampleCount,
+  ageDays,
+  today,
+  latestDate,
+}: {
+  config: SourceFreshnessConfig;
+  diagnostics: HealthConnectDiagnosticRow[];
+  missingTypes: CanonicalType[];
+  sampleCount: number;
+  ageDays?: number;
+  today: string;
+  latestDate?: string;
+}): string[] {
+  const limitations: string[] = [];
+
+  if (!sampleCount) {
+    limitations.push(config.missingLimitation);
+  }
+
+  if (ageDays != null && ageDays > config.maxFreshAgeDays) {
+    limitations.push(`Latest ${config.label.toLowerCase()} data is ${ageDays} days old.`);
+  }
+
+  if (config.todayIsPartial && latestDate === today) {
+    limitations.push('Today is still in progress; this domain may change after the next sync.');
+  }
+
+  if (missingTypes.length) {
+    limitations.push(
+      `Missing ${missingTypes.map(canonicalTypeLabel).join(', ')} in imported rows.`,
+    );
+  }
+
+  const relevantDiagnostics = diagnostics.filter((diagnostic) =>
+    config.canonicalTypes.includes(diagnostic.canonical_type),
+  );
+  const missingPermissions = relevantDiagnostics.filter(
+    (diagnostic) => diagnostic.permission === 'missing',
+  );
+  if (missingPermissions.length) {
+    const missingLabels = Array.from(
+      new Set(missingPermissions.map((diagnostic) => canonicalTypeLabel(diagnostic.canonical_type))),
+    );
+    limitations.push(`Missing Health Connect permission for ${missingLabels.join(', ')}.`);
+  }
+
+  const emptyReads = relevantDiagnostics.filter(
+    (diagnostic) =>
+      diagnostic.permission === 'granted' &&
+      diagnostic.records_read === 0 &&
+      diagnostic.samples_written === 0,
+  );
+  if (emptyReads.length) {
+    const emptyLabels = Array.from(
+      new Set(emptyReads.map((diagnostic) => canonicalTypeLabel(diagnostic.canonical_type))),
+    );
+    limitations.push(`Latest Health Connect read returned no ${emptyLabels.join(', ')} data.`);
+  }
+
+  return Array.from(new Set(limitations));
+}
+
+async function getLatestHealthConnectDiagnostics(
+  db: SQLite.SQLiteDatabase,
+): Promise<HealthConnectDiagnosticRow[]> {
+  return db.getAllAsync<HealthConnectDiagnosticRow>(`
+    SELECT record_type, canonical_type, permission, read_kind, records_read, samples_written, message
+    FROM health_connect_diagnostics
+    WHERE sync_started_at = (
+      SELECT MAX(sync_started_at)
+      FROM health_connect_diagnostics
+    )
+    ORDER BY canonical_type ASC, read_kind ASC, record_type ASC
+  `);
+}
+
+async function getSourceFreshness(db: SQLite.SQLiteDatabase): Promise<SourceFreshness[]> {
+  const today = localDateKey(new Date());
+  const diagnostics = await getLatestHealthConnectDiagnostics(db);
+  const rows: SourceFreshness[] = [];
+
+  for (const config of sourceFreshnessConfigs) {
+    const [stats, presentTypes] = await Promise.all([
+      freshnessStatsFor(db, config),
+      presentCanonicalTypesFor(db, config.canonicalTypes),
+    ]);
+    const sampleCount = Number(stats?.sample_count ?? 0);
+    const dayCount = Number(stats?.day_count ?? 0);
+    const latestDate = stats?.latest_date ?? undefined;
+    const ageDays = daysSinceLocalDate(latestDate, today);
+    const missingTypes =
+      config.partialWhenMissingTypes && sampleCount > 0
+        ? config.canonicalTypes.filter((type) => !presentTypes.has(type))
+        : [];
+    const limitations = buildFreshnessLimitations({
+      config,
+      diagnostics,
+      missingTypes,
+      sampleCount,
+      ageDays,
+      today,
+      latestDate,
+    });
+
+    let state: SourceFreshness['state'] = 'fresh';
+    if (!sampleCount) {
+      state = 'missing';
+    } else if (ageDays != null && ageDays > config.maxFreshAgeDays) {
+      state = 'stale';
+    } else if (missingTypes.length || (config.todayIsPartial && latestDate === today)) {
+      state = 'partial';
+    }
+
+    rows.push({
+      domain: config.domain,
+      label: config.label,
+      state,
+      canonicalTypes: config.canonicalTypes,
+      sampleCount,
+      dayCount,
+      latestLocalDate: latestDate,
+      lastUpdatedAt: stats?.last_updated_at ?? undefined,
+      ageDays,
+      limitations,
+    });
+  }
+
+  return rows;
 }
 
 function toDailyMetrics(row: DailyMetricsRow): DailyMetrics {
@@ -1235,9 +1641,38 @@ function average(values: (number | undefined)[]): number | undefined {
   return filtered.reduce((sum, value) => sum + value, 0) / filtered.length;
 }
 
+function recommendationFreshnessGaps(sourceFreshness: SourceFreshness[]): SourceFreshness[] {
+  const importantDomains: SourceFreshnessDomain[] = [
+    'sleep',
+    'hrv',
+    'resting_hr',
+    'steps',
+    'energy',
+  ];
+
+  return sourceFreshness.filter(
+    (item) =>
+      importantDomains.includes(item.domain) &&
+      (item.state === 'stale' || item.state === 'missing' || item.state === 'partial'),
+  );
+}
+
+function sourceFreshnessPenalty(gaps: SourceFreshness[]): number {
+  if (gaps.some((gap) => gap.state === 'missing')) {
+    return 10;
+  }
+
+  if (gaps.some((gap) => gap.state === 'stale')) {
+    return 7;
+  }
+
+  return gaps.length ? 3 : 0;
+}
+
 function deriveRecommendation(
   current: DailyMetrics | null,
   history: DailyMetrics[],
+  sourceFreshness: SourceFreshness[] = [],
 ): CoachRecommendation {
   if (!current || current.sourceCount === 0) {
     return {
@@ -1271,6 +1706,7 @@ function deriveRecommendation(
 
   let readiness = 56;
   const signals: string[] = [];
+  const freshnessGaps = recommendationFreshnessGaps(sourceFreshness);
 
   if (current.sleepSeconds != null) {
     if (sleepHours >= 7.5) {
@@ -1308,6 +1744,13 @@ function deriveRecommendation(
   if ((current.activityElapsedSeconds ?? 0) > 5400) {
     readiness -= 8;
     signals.push('you already logged a long session today');
+  }
+
+  if (freshnessGaps.length) {
+    const primaryGaps = freshnessGaps.slice(0, 2);
+    const labels = primaryGaps.map((gap) => `${gap.label.toLowerCase()} is ${gap.state}`);
+    readiness -= sourceFreshnessPenalty(freshnessGaps);
+    signals.push(`${labels.join(' and ')}, so this call is conservative`);
   }
 
   readiness = Math.max(20, Math.min(96, Math.round(readiness)));
@@ -1397,15 +1840,10 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
     sleepCount,
     nutritionDays,
   );
-  const diagnosticRows = await db.getAllAsync<HealthConnectDiagnosticRow>(`
-    SELECT record_type, canonical_type, permission, read_kind, records_read, samples_written, message
-    FROM health_connect_diagnostics
-    WHERE sync_started_at = (
-      SELECT MAX(sync_started_at)
-      FROM health_connect_diagnostics
-    )
-    ORDER BY canonical_type ASC, read_kind ASC, record_type ASC
-  `);
+  const [diagnosticRows, sourceFreshness] = await Promise.all([
+    getLatestHealthConnectDiagnostics(db),
+    getSourceFreshness(db),
+  ]);
 
   const rows = await db.getAllAsync<DailyMetricsRow>(`
     SELECT *
@@ -1426,6 +1864,7 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
     nutritionDays,
     coverageDays: Number(coverageRow?.total ?? 0),
     metricAvailability,
+    sourceFreshness,
     latestDiagnostics: diagnosticRows.map((row) => ({
       recordType: row.record_type,
       canonicalType: row.canonical_type,
@@ -1475,7 +1914,7 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
       metadataJson: row.metadata_json,
       sourceModifiedAt: row.source_modified_at ?? undefined,
     })),
-    recommendation: deriveRecommendation(today, history),
+    recommendation: deriveRecommendation(today, history, sourceFreshness),
   };
 }
 
@@ -1678,7 +2117,16 @@ export async function clearPipeline(): Promise<void> {
 
 export async function exportPipelineJson(): Promise<string> {
   const db = await getDb();
-  const [samples, sleepSessions, workouts, nutritionDaily, dailyMetrics, syncRuns, diagnostics] =
+  const [
+    samples,
+    sleepSessions,
+    workouts,
+    nutritionDaily,
+    dailyMetrics,
+    syncRuns,
+    diagnostics,
+    sourceFreshness,
+  ] =
     await Promise.all([
       db.getAllAsync<HealthSampleRow>('SELECT * FROM health_samples ORDER BY start_at ASC'),
       db.getAllAsync<SleepSessionRow>('SELECT * FROM sleep_sessions ORDER BY start_at ASC'),
@@ -1687,16 +2135,18 @@ export async function exportPipelineJson(): Promise<string> {
       db.getAllAsync<DailyMetricsRow>('SELECT * FROM daily_metrics ORDER BY date ASC'),
       db.getAllAsync<SyncRunRow>('SELECT * FROM sync_runs ORDER BY started_at ASC'),
       db.getAllAsync('SELECT * FROM health_connect_diagnostics ORDER BY sync_started_at ASC'),
+      getSourceFreshness(db),
     ]);
 
   const payload = {
-    schema: 'biostream_training_pipeline.v2',
+    schema: 'biostream_training_pipeline.v3',
     exportedAt: new Date().toISOString(),
     samples,
     sleepSessions,
     workouts,
     nutritionDaily,
     dailyMetrics,
+    sourceFreshness,
     syncRuns,
     diagnostics,
   };

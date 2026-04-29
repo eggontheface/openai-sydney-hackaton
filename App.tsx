@@ -57,6 +57,7 @@ import type {
   HealthConnectReadDiagnostic,
   MetricAvailability,
   PipelineSnapshot,
+  SourceFreshness,
   WorkoutRecord,
 } from './src/health/types';
 import {
@@ -126,6 +127,7 @@ const emptySnapshot: PipelineSnapshot = {
   nutritionDays: 0,
   coverageDays: 0,
   metricAvailability: [],
+  sourceFreshness: [],
   latestDiagnostics: [],
   today: null,
   history: [],
@@ -1414,13 +1416,45 @@ function DiagnosticRow({ diagnostic }: { diagnostic: HealthConnectReadDiagnostic
   );
 }
 
-function hasReadPermissionFor(
-  diagnostics: HealthConnectReadDiagnostic[],
-  types: CanonicalType[],
-): boolean {
-  return diagnostics.some(
-    (diagnostic) =>
-      types.includes(diagnostic.canonicalType) && diagnostic.permission === 'granted',
+function freshnessStateLabel(state: SourceFreshness['state']): string {
+  if (state === 'fresh') return 'Fresh';
+  if (state === 'partial') return 'Partial';
+  if (state === 'stale') return 'Stale';
+  return 'Missing';
+}
+
+function freshnessBadgeStyle(state: SourceFreshness['state']) {
+  if (state === 'fresh') return styles.scoreBadge_live;
+  if (state === 'partial') return styles.scoreBadge_permission;
+  if (state === 'stale') return styles.scoreBadge_empty;
+  return styles.scoreBadge_unchecked;
+}
+
+function SourceFreshnessRow({ source }: { source: SourceFreshness }) {
+  const active = source.state === 'fresh' || source.state === 'partial';
+  const detailParts = [
+    source.latestLocalDate ? `Latest ${formatDateKey(source.latestLocalDate)}` : null,
+    source.lastUpdatedAt ? `Updated ${formatShortDateTime(source.lastUpdatedAt)}` : null,
+    source.sampleCount ? `${formatNumber(source.sampleCount)} rows` : null,
+  ].filter(Boolean);
+  const fallbackDetail = detailParts.length
+    ? detailParts.join(' · ')
+    : 'No status detail available';
+  const detail = source.limitations[0] ?? fallbackDetail;
+
+  return (
+    <View style={styles.diagnosticRow}>
+      <View style={[styles.diagnosticDot, active && styles.diagnosticDotActive]} />
+      <View style={styles.diagnosticCopy}>
+        <View style={styles.scoreTitleLine}>
+          <Text style={styles.diagnosticTitle}>{source.label}</Text>
+          <Text style={[styles.scoreBadge, freshnessBadgeStyle(source.state)]}>
+            {freshnessStateLabel(source.state)}
+          </Text>
+        </View>
+        <Text style={styles.diagnosticDetail}>{detail}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -1486,17 +1520,17 @@ function SourceScreen({
   const focusedDiagnostics = snapshot.latestDiagnostics.filter((diagnostic) =>
     diagnosticFocus.includes(diagnostic.canonicalType),
   );
-  const hasPermission = (types: CanonicalType[]) =>
-    hasReadPermissionFor(snapshot.latestDiagnostics, types);
   const hasSamples = (types: CanonicalType[]) =>
     hasDiagnosticSamples(snapshot.latestDiagnostics, types);
+  const hasAvailability = (types: CanonicalType[]) =>
+    availabilityForTypes(snapshot.metricAvailability, types).sampleCount > 0;
   const hasHistory = (predicate: (day: DailyMetrics) => boolean) =>
     snapshot.history.some(predicate);
   const hasSleepSignal =
     snapshot.sleepCount > 0 ||
     hasHistory((day) => day.sleepSeconds != null) ||
     hasSamples(['sleep_session']) ||
-    hasPermission(['sleep_session']);
+    hasAvailability(['sleep_session']);
   const hasVitalsSignal =
     hasHistory(
       (day) =>
@@ -1506,16 +1540,16 @@ function SourceScreen({
         day.vo2max != null,
     ) ||
     hasSamples(['heart_rate', 'resting_heart_rate', 'hrv_rmssd', 'vo2max']) ||
-    hasPermission(['heart_rate', 'resting_heart_rate', 'hrv_rmssd', 'vo2max']);
-  const hasWorkoutSignal = snapshot.workoutCount > 0 || hasPermission(['workout']);
+    hasAvailability(['heart_rate', 'resting_heart_rate', 'hrv_rmssd', 'vo2max']);
+  const hasWorkoutSignal = snapshot.workoutCount > 0 || hasAvailability(['workout']);
   const hasActivitySignal =
     hasHistory((day) => day.hasSteps || day.hasEnergy || day.distanceKm != null) ||
     hasSamples(['steps', 'active_energy', 'total_energy', 'distance']) ||
-    hasPermission(['steps', 'active_energy', 'total_energy', 'distance']);
+    hasAvailability(['steps', 'active_energy', 'total_energy', 'distance']);
   const hasNutritionSignal =
     snapshot.nutritionDays > 0 ||
     hasSamples(['nutrition', 'hydration']) ||
-    hasPermission(['nutrition', 'hydration']);
+    hasAvailability(['nutrition', 'hydration']);
   const hasBodySignal =
     hasHistory(
       (day) =>
@@ -1524,7 +1558,7 @@ function SourceScreen({
         day.leanBodyMassKg != null,
     ) ||
     hasSamples(['weight', 'body_fat', 'lean_body_mass']) ||
-    hasPermission(['weight', 'body_fat', 'lean_body_mass']);
+    hasAvailability(['weight', 'body_fat', 'lean_body_mass']);
 
   return (
     <View style={styles.screen}>
@@ -1675,6 +1709,17 @@ function SourceScreen({
               ))}
             </View>
           </View>
+        </View>
+
+        <SectionLabel>Source freshness</SectionLabel>
+        <View style={styles.diagnosticList}>
+          {snapshot.sourceFreshness.length ? (
+            snapshot.sourceFreshness.map((source) => (
+              <SourceFreshnessRow key={source.domain} source={source} />
+            ))
+          ) : (
+            <Text style={styles.emptyText}>Run a sync to derive source freshness.</Text>
+          )}
         </View>
 
         <SectionLabel>Schema coverage</SectionLabel>

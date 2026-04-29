@@ -95,6 +95,15 @@ function buildCoachContext(snapshot: PipelineSnapshot, healthContext: CoachHealt
       coverageDays: snapshot.coverageDays,
     },
     currentRecommendation: snapshot.recommendation,
+    sourceFreshness: snapshot.sourceFreshness.map((source) => ({
+      domain: source.domain,
+      label: source.label,
+      state: source.state,
+      latestLocalDate: source.latestLocalDate,
+      lastUpdatedAt: source.lastUpdatedAt,
+      ageDays: source.ageDays,
+      limitations: source.limitations,
+    })),
     today: snapshot.today
       ? {
           date: snapshot.today.date,
