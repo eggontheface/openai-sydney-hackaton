@@ -1,12 +1,21 @@
-import type { LucideIcon } from 'lucide-react-native';
+import type { LucideIcon } from "lucide-react-native";
 
-import type { CanonicalType } from '../health/types';
-import type { getLastSyncRun, getRecentSyncRuns } from '../storage/trainingStore';
+import type { CanonicalType } from "../health/types";
+import type {
+  getLastSyncRun,
+  getRecentSyncRuns,
+} from "../storage/trainingStore";
 
 export type LastSync = Awaited<ReturnType<typeof getLastSyncRun>>;
 export type SyncRuns = Awaited<ReturnType<typeof getRecentSyncRuns>>;
-export type Tab = 'coach' | 'workout' | 'history' | 'you';
-export type OnboardingStepId = 'data' | 'analysis' | 'goal' | 'event' | 'constraints';
+export type Tab = "coach" | "workout" | "history" | "you";
+export type OnboardingStepId =
+  | "data"
+  | "analysis"
+  | "goal"
+  | "event"
+  | "constraints"
+  | "summary";
 
 export type OnboardingSuggestion = {
   title: string;
@@ -18,14 +27,14 @@ export type OnboardingStep = {
   id: OnboardingStepId;
   question: string;
   subtext: string;
-  suggestions: OnboardingSuggestion[];
+  suggestions?: OnboardingSuggestion[];
 };
 
-export type MetricStatus = 'live' | 'permission' | 'empty' | 'unchecked';
+export type MetricStatus = "live" | "permission" | "empty" | "unchecked";
 
 export type CoachConversationMessage = {
   id: string;
-  role: 'coach' | 'user';
+  role: "coach" | "user";
   text: string;
 };
 
