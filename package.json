@@ -10,7 +10,8 @@
     "prebuild": "expo prebuild",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:ci": "jest --runInBand",
+    "test:ci": "jest --runInBand && npm run test:rollups",
+    "test:rollups": "tsc -p tsconfig.test.json && node --test src/storage/trainingStoreRules.test.cjs",
     "typecheck": "tsc --noEmit",
     "web": "expo start --web"
   },

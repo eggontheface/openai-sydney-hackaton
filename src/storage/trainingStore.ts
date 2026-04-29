@@ -4,6 +4,11 @@ import * as SQLite from 'expo-sqlite';
 
 import { formatDuration, localDateKey } from '../lib/dates';
 import { safeJsonStringify } from '../lib/json';
+import {
+  buildDailyMetricsRollup,
+  normalizeLegacyHealthSampleRow,
+  type LegacyHealthSampleRow,
+} from './trainingStoreRules';
 import type {
   CanonicalType,
   CoachRecommendation,
@@ -1086,29 +1091,40 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     'PRAGMA table_info(health_samples_legacy)',
   );
   if (legacyColumns.length) {
-    await db.execAsync(`
-      INSERT OR IGNORE INTO health_samples (
-        sample_id, platform, record_type, canonical_type, source_app, source_device,
-        start_at, end_at, local_date, value, unit, metadata_json, imported_at
-      )
+    const legacyRows = await db.getAllAsync<LegacyHealthSampleRow>(`
       SELECT
-        id,
-        CASE provider WHEN 'apple_health' THEN 'healthkit' ELSE provider END,
-        metric,
-        metric,
-        source_name,
-        source_id,
-        start_time,
-        end_time,
-        date(start_time, 'localtime'),
-        value,
-        unit,
-        raw_json,
-        synced_at
-      FROM health_samples_legacy;
-
-      DROP TABLE health_samples_legacy;
+        id, provider, metric, source_name, source_id, start_time, end_time,
+        value, unit, raw_json, synced_at
+      FROM health_samples_legacy
     `);
+
+    for (const row of legacyRows) {
+      const sample = normalizeLegacyHealthSampleRow(row);
+      await db.runAsync(
+        `
+          INSERT OR IGNORE INTO health_samples (
+            sample_id, platform, record_type, canonical_type, source_app, source_device,
+            start_at, end_at, local_date, value, unit, metadata_json, imported_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        sample.sampleId,
+        sample.platform,
+        sample.recordType,
+        sample.canonicalType,
+        sample.sourceApp,
+        sample.sourceDevice,
+        sample.startAt,
+        sample.endAt,
+        sample.localDate,
+        sample.value,
+        sample.unit,
+        sample.metadataJson,
+        sample.importedAt,
+      );
+    }
+
+    await db.execAsync('DROP TABLE health_samples_legacy;');
   }
 }
 
@@ -1551,27 +1567,51 @@ async function rebuildDailyMetrics(): Promise<void> {
       date,
     );
 
-    const sleepSeconds = sleep?.sleep_seconds ?? sleepFallback ?? null;
-    const timeInBedSeconds = sleep?.time_in_bed_seconds ?? sleepFallback ?? null;
-    const hasSleep = Boolean(sleepSeconds);
-    const hasActivity = Boolean(workout.workout_count);
-    const hasNutrition = Boolean(nutrition);
-    const hasSteps = steps != null;
-    const hasEnergy = activeKcal != null || totalKcal != null;
-    const hasVitals = Boolean(restingHr || hrv || heartRateAvg || weightKg || bodyFatPct);
-    const hasPlatformWellness = hasSleep || hasVitals;
-    const sourceCount = [
-      hasPlatformWellness,
-      hasActivity,
-      hasNutrition,
-      hasSteps,
-      hasEnergy,
-    ].filter(Boolean).length;
-    const dataCompleteness =
-      date === today ? 'partial' : sourceCount >= 4 ? 'full' : sourceCount > 0 ? 'partial' : 'empty';
-    const wellnessDataStatus = sourceCount
-      ? `Health Connect ${dataCompleteness}`
-      : 'No platform data';
+    const daily = buildDailyMetricsRollup({
+      date,
+      today,
+      generatedAt,
+      steps,
+      activeKcal,
+      totalKcal,
+      distanceMeters,
+      sleep: sleep
+        ? {
+            sleepSeconds: sleep.sleep_seconds ?? undefined,
+            timeInBedSeconds: sleep.time_in_bed_seconds ?? undefined,
+            sleepEfficiency: sleep.sleep_efficiency ?? undefined,
+          }
+        : null,
+      sleepFallbackSeconds: sleepFallback,
+      restingHr,
+      heartRateAvgBpm: heartRateAvg,
+      heartRateMinBpm: heartRateMin,
+      heartRateMaxBpm: heartRateMax,
+      hrvLastNightAvg: hrv,
+      workout: {
+        workoutCount: workout.workout_count,
+        runWorkoutCount: workout.run_workout_count,
+        rideWorkoutCount: workout.ride_workout_count,
+        strengthWorkoutCount: workout.strength_workout_count,
+        activityElapsedSeconds: workout.activity_elapsed_seconds ?? undefined,
+        activityKcal: workout.activity_kcal ?? undefined,
+      },
+      nutrition: nutrition
+        ? {
+            kcalIn: nutrition.kcal_in ?? undefined,
+            proteinG: nutrition.protein_g ?? undefined,
+            carbsG: nutrition.carbs_g ?? undefined,
+            fatG: nutrition.fat_g ?? undefined,
+            fiberG: nutrition.fiber_g ?? undefined,
+            sugarG: nutrition.sugar_g ?? undefined,
+            waterMl: nutrition.water_ml ?? undefined,
+          }
+        : null,
+      weightKg,
+      bodyFatPct,
+      leanBodyMassKg,
+      vo2max,
+    });
 
     await db.runAsync(
       `
@@ -1589,46 +1629,46 @@ async function rebuildDailyMetrics(): Promise<void> {
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
-      date,
-      dataCompleteness,
-      wellnessDataStatus,
-      sourceCount,
-      hasPlatformWellness ? 1 : 0,
-      hasActivity ? 1 : 0,
-      hasNutrition ? 1 : 0,
-      hasSleep ? 1 : 0,
-      hasSteps ? 1 : 0,
-      hasEnergy ? 1 : 0,
-      steps ?? null,
-      activeKcal ?? null,
-      totalKcal ?? null,
-      distanceMeters == null ? null : distanceMeters / 1000,
-      sleepSeconds,
-      timeInBedSeconds,
-      sleep?.sleep_efficiency ?? null,
-      restingHr ?? null,
-      heartRateAvg ?? null,
-      heartRateMin ?? null,
-      heartRateMax ?? null,
-      hrv ?? null,
-      workout.workout_count,
-      workout.run_workout_count,
-      workout.ride_workout_count,
-      workout.strength_workout_count,
-      workout.activity_elapsed_seconds,
-      workout.activity_kcal,
-      nutrition?.kcal_in ?? null,
-      nutrition?.protein_g ?? null,
-      nutrition?.carbs_g ?? null,
-      nutrition?.fat_g ?? null,
-      nutrition?.fiber_g ?? null,
-      nutrition?.sugar_g ?? null,
-      nutrition?.water_ml ?? null,
-      weightKg ?? null,
-      bodyFatPct ?? null,
-      leanBodyMassKg ?? null,
-      vo2max ?? null,
-      generatedAt,
+      daily.date,
+      daily.dataCompleteness,
+      daily.wellnessDataStatus,
+      daily.sourceCount,
+      daily.hasPlatformWellness ? 1 : 0,
+      daily.hasActivity ? 1 : 0,
+      daily.hasNutrition ? 1 : 0,
+      daily.hasSleep ? 1 : 0,
+      daily.hasSteps ? 1 : 0,
+      daily.hasEnergy ? 1 : 0,
+      daily.steps ?? null,
+      daily.activeKcal ?? null,
+      daily.totalKcal ?? null,
+      daily.distanceKm ?? null,
+      daily.sleepSeconds ?? null,
+      daily.timeInBedSeconds ?? null,
+      daily.sleepEfficiency ?? null,
+      daily.restingHr ?? null,
+      daily.heartRateAvgBpm ?? null,
+      daily.heartRateMinBpm ?? null,
+      daily.heartRateMaxBpm ?? null,
+      daily.hrvLastNightAvg ?? null,
+      daily.workoutCount ?? null,
+      daily.runWorkoutCount ?? null,
+      daily.rideWorkoutCount ?? null,
+      daily.strengthWorkoutCount ?? null,
+      daily.activityElapsedSeconds ?? null,
+      daily.activityKcal ?? null,
+      daily.kcalIn ?? null,
+      daily.proteinG ?? null,
+      daily.carbsG ?? null,
+      daily.fatG ?? null,
+      daily.fiberG ?? null,
+      daily.sugarG ?? null,
+      daily.waterMl ?? null,
+      daily.weightKg ?? null,
+      daily.bodyFatPct ?? null,
+      daily.leanBodyMassKg ?? null,
+      daily.vo2max ?? null,
+      daily.generatedAt,
     );
   }
 }

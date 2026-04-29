@@ -1,0 +1,117 @@
+{
+  "today": "2026-04-29",
+  "generatedAt": "2026-04-29T12:00:00.000Z",
+  "healthSamples": [
+    {
+      "sampleId": "steps-full-1",
+      "canonicalType": "steps",
+      "localDate": "2026-04-28",
+      "value": 8200
+    },
+    {
+      "sampleId": "active-full-1",
+      "canonicalType": "active_energy",
+      "localDate": "2026-04-28",
+      "value": 540
+    },
+    {
+      "sampleId": "total-full-1",
+      "canonicalType": "total_energy",
+      "localDate": "2026-04-28",
+      "value": 2380
+    },
+    {
+      "sampleId": "distance-full-1",
+      "canonicalType": "distance",
+      "localDate": "2026-04-28",
+      "value": 6400
+    },
+    {
+      "sampleId": "resting-full-1",
+      "canonicalType": "resting_heart_rate",
+      "localDate": "2026-04-28",
+      "value": 51
+    },
+    {
+      "sampleId": "hrv-full-1",
+      "canonicalType": "hrv_rmssd",
+      "localDate": "2026-04-28",
+      "value": 62
+    },
+    {
+      "sampleId": "heart-full-1",
+      "canonicalType": "heart_rate",
+      "localDate": "2026-04-28",
+      "value": 58
+    },
+    {
+      "sampleId": "heart-full-2",
+      "canonicalType": "heart_rate",
+      "localDate": "2026-04-28",
+      "value": 104
+    },
+    {
+      "sampleId": "weight-full-1",
+      "canonicalType": "weight",
+      "localDate": "2026-04-28",
+      "value": 78.4
+    },
+    {
+      "sampleId": "steps-partial-1",
+      "canonicalType": "steps",
+      "localDate": "2026-04-27",
+      "value": 3100
+    }
+  ],
+  "sleepSessions": [
+    {
+      "sleepId": "sleep-wake-full",
+      "startAt": "2026-04-27T22:35:00+10:00",
+      "endAt": "2026-04-28T06:45:00+10:00",
+      "wakeDate": "2026-04-28",
+      "sleepSeconds": 25200,
+      "timeInBedSeconds": 29400,
+      "sleepEfficiency": 0.857
+    }
+  ],
+  "workouts": [
+    {
+      "workoutId": "run-full-1",
+      "localDate": "2026-04-28",
+      "sportBucket": "run",
+      "elapsedSeconds": 2700,
+      "activeKcal": 410
+    }
+  ],
+  "nutritionDaily": [
+    {
+      "date": "2026-04-28",
+      "kcalIn": 2210,
+      "proteinG": 132,
+      "carbsG": 245,
+      "fatG": 74,
+      "fiberG": 28,
+      "sugarG": 46,
+      "waterMl": 2600
+    },
+    {
+      "date": "2026-04-27",
+      "waterMl": 1200
+    }
+  ],
+  "legacyHealthSamples": [
+    {
+      "id": "legacy-steps-1",
+      "provider": "apple_health",
+      "metric": "steps",
+      "source_name": "Apple Health",
+      "source_id": "iphone",
+      "start_time": "2026-04-28T10:15:00+10:00",
+      "end_time": "2026-04-28T10:30:00+10:00",
+      "value": 900,
+      "unit": "count",
+      "raw_json": "{\"legacy\":true}",
+      "synced_at": "2026-04-29T00:00:00.000Z"
+    }
+  ]
+}

@@ -47,11 +47,12 @@ The app uses Jest with the Expo preset so data, coach, and UI work can share one
 ```sh
 npm test
 npm run test:watch
+npm run test:rollups
 npm run test:ci
 npm run typecheck
 ```
 
-Place app tests under `src/` using `*.test.ts` or `*.test.tsx`. Prefer pure TypeScript tests for data and coach logic, and React Native Testing Library for component behavior.
+Place app tests under `src/` using `*.test.ts` or `*.test.tsx`. Prefer pure TypeScript tests for data and coach logic, React Native Testing Library for component behavior, and `npm run test:rollups` for the platform-neutral daily rollup and legacy migration fixtures.
 
 ## Native Notes
 

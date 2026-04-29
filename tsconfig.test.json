@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "target": "ES2020",
+    "outDir": ".tmp/test-build",
+    "rootDir": ".",
+    "noEmit": false,
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/health/types.ts",
+    "src/lib/dates.ts",
+    "src/storage/trainingStoreRules.ts"
+  ]
+}
