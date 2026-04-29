@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -8,28 +8,46 @@ import {
   Text,
   TextInput,
   View,
-} from 'react-native';
-import { Activity, ArrowRight, MoreHorizontal, RefreshCw } from 'lucide-react-native';
+} from "react-native";
+import {
+  Activity,
+  ArrowRight,
+  MoreHorizontal,
+  RefreshCw,
+} from "lucide-react-native";
 
-import { generateTrainingPlan, resolveTrainingGoal } from '../coach/planEngine';
-import { dataAge, formatDateKey, formatNumber, hrvMetricLabel, toneColor } from '../core/formatters';
-import type { CoachConversationMessage, LastSync } from '../core/types';
-import type { PipelineSnapshot } from '../health/types';
-import { formatDuration as formatDurationFromDates } from '../lib/dates';
-import { styles } from '../styles/appStyles';
-import { tokens } from '../theme/tokens';
-import { AppButton, CoachAvatar, CoachLine, DataCard, SmallMetric, UserBubble } from '../ui/primitives';
+import { generateTrainingPlan, resolveTrainingGoal } from "../coach/planEngine";
+import {
+  dataAge,
+  formatDateKey,
+  formatNumber,
+  hrvMetricLabel,
+  toneColor,
+} from "../core/formatters";
+import type { CoachConversationMessage, LastSync } from "../core/types";
+import type { PipelineSnapshot } from "../health/types";
+import { formatDuration as formatDurationFromDates } from "../lib/dates";
+import { styles } from "../styles/appStyles";
+import { tokens } from "../theme/tokens";
+import {
+  AppButton,
+  CoachAvatar,
+  CoachLine,
+  DataCard,
+  SmallMetric,
+  UserBubble,
+} from "../ui/primitives";
 
 function coachGoalPhrase(goalText: string): string {
-  const goal = goalText.trim().replace(/[.!?]+$/, '');
+  const goal = goalText.trim().replace(/[.!?]+$/, "");
   const normalized = goal.toLowerCase();
 
-  if (!goal) return 'your training goal';
-  if (normalized.includes('half marathon')) return 'your half marathon goal';
-  if (normalized.includes('marathon')) return 'your marathon goal';
-  if (normalized.includes('hyrox')) return 'your HYROX goal';
-  if (normalized.includes('strength')) return 'your strength goal';
-  if (normalized.includes('fitness')) return 'your fitness goal';
+  if (!goal) return "your training goal";
+  if (normalized.includes("half marathon")) return "your half marathon goal";
+  if (normalized.includes("marathon")) return "your marathon goal";
+  if (normalized.includes("hyrox")) return "your HYROX goal";
+  if (normalized.includes("strength")) return "your strength goal";
+  if (normalized.includes("fitness")) return "your fitness goal";
 
   return goal;
 }
@@ -72,42 +90,47 @@ export function CoachScreen({
     () => generateTrainingPlan(snapshot, resolveTrainingGoal(goalText)),
     [goalText, snapshot],
   );
-  const sleep = current?.sleepSeconds ? formatDurationFromDates(current.sleepSeconds) : '—';
-  const hrv = current?.hrvLastNightAvg ? `${Math.round(current.hrvLastNightAvg)} ms` : '—';
+  const sleep = current?.sleepSeconds
+    ? formatDurationFromDates(current.sleepSeconds)
+    : "—";
+  const hrv = current?.hrvLastNightAvg
+    ? `${Math.round(current.hrvLastNightAvg)} ms`
+    : "—";
   const hrvLabel = hrvMetricLabel(current);
-  const rhr = current?.restingHr ? `${Math.round(current.restingHr)} bpm` : '—';
-  const athleteName = 'Martin';
+  const rhr = current?.restingHr ? `${Math.round(current.restingHr)} bpm` : "—";
+  const athleteName = "Martin";
   const goalPhrase = coachGoalPhrase(goalText);
   const wearableLabel =
-    Platform.OS === 'ios'
-      ? 'Apple Watch'
-      : Platform.OS === 'android'
-        ? 'connected wearable'
-        : 'wearable data';
+    Platform.OS === "ios"
+      ? "Apple Watch"
+      : Platform.OS === "android"
+        ? "connected wearable"
+        : "wearable data";
   const sourceLabel =
-    Platform.OS === 'ios'
-      ? 'Apple Health'
-      : Platform.OS === 'android'
-        ? 'Health Connect'
-        : 'web demo data';
+    Platform.OS === "ios"
+      ? "Apple Health"
+      : Platform.OS === "android"
+        ? "Health Connect"
+        : "web demo data";
   const quickReplies = [
-    'Talk me through the week',
-    'What should we adjust?',
-    'I feel different today',
+    "Talk me through the week",
+    "What should we adjust?",
+    "I feel different today",
   ];
   const coachInputDisabled = coachBusy || busy;
   const canSendCoachMessage = !coachBusy && !busy && Boolean(coachDraft.trim());
   const composerPlaceholder = hasOpenAiApiKey
     ? busy
-      ? 'Sync in progress...'
-      : 'Ask your coach...'
-    : 'Ask your coach...';
+      ? "Sync in progress..."
+      : "Ask your coach..."
+    : "Ask your coach...";
   const hasSyncedData =
     snapshot.totalSamples > 0 ||
     snapshot.workoutCount > 0 ||
     snapshot.sleepCount > 0 ||
     snapshot.nutritionDays > 0 ||
     snapshot.coverageDays > 0;
+  const loadingInitialMetrics = busy && !hasSyncedData;
   const coachGreeting = hasSyncedData
     ? `Good morning ${athleteName}. You are in a good spot to keep building toward ${goalPhrase}. I have checked the recovery picture and lined up today's work. If anything has changed since the data came in, tell me and I will adjust it.`
     : `Good morning ${athleteName}. Let's keep building toward ${goalPhrase}. I do not have enough wearable history yet, so I will keep things sensible and adjust as you give me more context.`;
@@ -157,17 +180,43 @@ export function CoachScreen({
         <DataCard accent={accent} inset label="Sleep & recovery">
           <View style={styles.sourceLine}>
             <Text style={styles.sourceLineText}>
-              {current?.hasSleep ? wearableLabel : 'Waiting for wearable data'}
+              {loadingInitialMetrics
+                ? "Loading wearable data"
+                : current?.hasSleep
+                  ? wearableLabel
+                  : "Waiting for wearable data"}
             </Text>
-            <Text style={styles.sourceLineText}>{dataAge(lastSync)}</Text>
+            <Text style={styles.sourceLineText}>
+              {loadingInitialMetrics ? status : dataAge(lastSync)}
+            </Text>
           </View>
           <View style={styles.metricGridFull}>
-            <SmallMetric label="Sleep" value={sleep} />
-            <SmallMetric label="Score" value={formatNumber(recommendation.readiness ?? undefined)} />
-            <SmallMetric label={hrvLabel} value={hrv.replace(' ms', '')} />
-            <SmallMetric label="RHR" value={rhr.replace(' bpm', '')} />
+            <SmallMetric
+              label="Sleep"
+              loading={loadingInitialMetrics}
+              value={sleep}
+            />
+            <SmallMetric
+              label="Score"
+              loading={loadingInitialMetrics}
+              value={formatNumber(recommendation.readiness ?? undefined)}
+            />
+            <SmallMetric
+              label={hrvLabel}
+              loading={loadingInitialMetrics}
+              value={hrv.replace(" ms", "")}
+            />
+            <SmallMetric
+              label="RHR"
+              loading={loadingInitialMetrics}
+              value={rhr.replace(" bpm", "")}
+            />
           </View>
-          <Text style={styles.helpText}>{recommendation.reason}</Text>
+          <Text style={styles.helpText}>
+            {loadingInitialMetrics
+              ? `Getting recent data from ${sourceLabel}.`
+              : recommendation.reason}
+          </Text>
         </DataCard>
 
         <Pressable accessibilityRole="button" onPress={onOpenWorkout}>
@@ -179,12 +228,17 @@ export function CoachScreen({
               <View style={styles.planCopy}>
                 <Text style={styles.planTitle}>{plan.today.title}</Text>
                 <View style={styles.coachPlanStats}>
-                  <Text style={styles.coachPlanStat}>{plan.today.durationMinutes}:00</Text>
+                  <Text style={styles.coachPlanStat}>
+                    {plan.today.durationMinutes}:00
+                  </Text>
                   <Text style={styles.coachPlanStat}>~7.2 km</Text>
-                  <Text style={styles.coachPlanStat}>{plan.today.intensity}</Text>
+                  <Text style={styles.coachPlanStat}>
+                    {plan.today.intensity}
+                  </Text>
                 </View>
                 <Text style={styles.planDetail}>
-                  Your {wearableLabel} will capture distance, pace, heart rate, route, splits, and duration.
+                  Your {wearableLabel} will capture distance, pace, heart rate,
+                  route, splits, and duration.
                 </Text>
               </View>
               <ArrowRight color={tokens.muted} size={17} strokeWidth={2} />
@@ -192,23 +246,27 @@ export function CoachScreen({
           </DataCard>
         </Pressable>
 
-        {coachMessages.length ? <Text style={styles.dateDivider}>Coach conversation</Text> : null}
+        {coachMessages.length ? (
+          <Text style={styles.dateDivider}>Coach conversation</Text>
+        ) : null}
         {coachMessages.map((message) =>
-          message.role === 'user' ? (
+          message.role === "user" ? (
             <UserBubble key={message.id}>{message.text}</UserBubble>
           ) : (
             <CoachLine key={message.id}>{message.text}</CoachLine>
           ),
         )}
         {coachBusy ? (
-          <CoachLine>Give me a second. I am checking your recent health data.</CoachLine>
+          <CoachLine>
+            Give me a second. I am checking your recent health data.
+          </CoachLine>
         ) : null}
 
         {!hasSyncedData ? (
           <DataCard accent={tokens.accent} inset label="Datasource">
             <Text style={styles.helpText}>
-              {sourceLabel} is the source of truth. Syncing creates raw schema rows,
-              then derives daily coaching metrics locally on this device.
+              {sourceLabel} is the source of truth. Syncing creates raw schema
+              rows, then derives daily coaching metrics locally on this device.
             </Text>
             <View style={styles.singleAction}>
               <AppButton

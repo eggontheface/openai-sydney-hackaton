@@ -49,7 +49,7 @@ import {
   type GoalCoachMessage,
   type GoalCoachResponse,
   type OnboardingAnswers,
-} from './src/onboarding/goalCoach';
+} from "./src/onboarding/goalCoach";
 import {
   clearOpenAiApiKey,
   loadAppSettings,
@@ -124,13 +124,31 @@ export default function App() {
     setRecentSyncRuns(nextRecentSyncRuns);
   }
 
+  async function refreshSyncHistory() {
+    const [nextLastSync, nextLastSuccessfulSync, nextRecentSyncRuns] =
+      await Promise.all([
+        getLastSyncRun(),
+        getLastSuccessfulSyncRun(),
+        getRecentSyncRuns(),
+      ]);
+    setLastSync(nextLastSync);
+    setLastSuccessfulSync(nextLastSuccessfulSync);
+    setRecentSyncRuns(nextRecentSyncRuns);
+  }
+
+  function refreshStoreInBackground() {
+    void refreshStore().catch((error) =>
+      setStatus(String(error instanceof Error ? error.message : error)),
+    );
+  }
+
   useEffect(() => {
     const bootstrap = initTrainingStore()
       .then(async () => {
         const nextSettings = await loadAppSettings();
         setAppSettings(nextSettings);
         setRangeDays(nextSettings.defaultSyncRangeDays);
-        await refreshStore();
+        refreshStoreInBackground();
       })
       .catch((error) =>
         setStatus(String(error instanceof Error ? error.message : error)),
@@ -298,7 +316,9 @@ export default function App() {
     const apiKey = await readOpenAiApiKey();
 
     if (!apiKey) {
-      setStatus('Onboarding coach is running in local demo mode. Add an OpenAI API key in You for live AI.');
+      setStatus(
+        "Onboarding coach is running in local demo mode. Add an OpenAI API key in You for live AI.",
+      );
       return {
         responseId: null,
         text: buildLocalGoalCoachReply(userMessage),
@@ -307,7 +327,7 @@ export default function App() {
 
     const freshSnapshot = await getPipelineSnapshot();
     setSnapshot(freshSnapshot);
-    setStatus('Onboarding coach is discussing your goal with OpenAI');
+    setStatus("Onboarding coach is discussing your goal with OpenAI");
 
     const response = await sendOnboardingGoalMessage({
       apiKey,
@@ -316,7 +336,7 @@ export default function App() {
       snapshot: freshSnapshot,
       userMessage,
     });
-    setStatus('Onboarding coach updated your goal profile');
+    setStatus("Onboarding coach updated your goal profile");
     return response;
   }
 
@@ -332,7 +352,9 @@ export default function App() {
 
     const apiKey = await readOpenAiApiKey();
     if (!apiKey) {
-      setStatus('Onboarding summary is running in local demo mode. Add an OpenAI API key in You for live AI.');
+      setStatus(
+        "Onboarding summary is running in local demo mode. Add an OpenAI API key in You for live AI.",
+      );
       return {
         responseId: null,
         text: buildLocalOnboardingSummary({
@@ -346,14 +368,14 @@ export default function App() {
       };
     }
 
-    setStatus('Onboarding coach is summarising your setup with OpenAI');
+    setStatus("Onboarding coach is summarising your setup with OpenAI");
     const response = await sendOnboardingSummaryMessage({
       apiKey,
       answers,
       conversation,
       snapshot: freshSnapshot,
     });
-    setStatus('Onboarding summary ready');
+    setStatus("Onboarding summary ready");
     return response;
   }
 
@@ -449,16 +471,18 @@ export default function App() {
         },
       );
       setWarnings(result.warnings);
+      await refreshSyncHistory();
       setStatus(`Synced ${saved.toLocaleString()} records`);
-      await refreshStore();
+      refreshStoreInBackground();
     } catch (error) {
       if (provider) {
         await recordSyncRun(provider, syncRange, 0, startedAt, error, {
           syncType,
         });
       }
+      await refreshSyncHistory();
       setStatus(String(error instanceof Error ? error.message : error));
-      await refreshStore();
+      refreshStoreInBackground();
     } finally {
       setBusy(false);
     }
@@ -466,16 +490,24 @@ export default function App() {
 
   async function syncDataAndStart() {
     setActiveTab("coach");
-    setEntryMode("loading-start");
+    setEntryMode("app");
     setStatus(
       canSync
         ? `Loading data from ${sourceLabel}`
         : "Opening local health store",
     );
+    setBusy(true);
 
-    await ensureStoreReady();
-    await runSync();
-    setEntryMode("app");
+    try {
+      await ensureStoreReady();
+      setStatus(`Syncing ${formatRange(range)}`);
+      await runSync();
+    } catch (error) {
+      const message = String(error instanceof Error ? error.message : error);
+      setStatus(message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function runExport() {
@@ -521,7 +553,7 @@ export default function App() {
       >
         {entryMode === "splash" ? (
           <SplashScreen
-            busy={!storeReady}
+            busy={busy}
             onStartOnboarding={() => setEntryMode("onboarding")}
             onSyncAndStart={() => void syncDataAndStart()}
             sourceLabel={sourceLabel}
