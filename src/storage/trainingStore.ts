@@ -128,6 +128,14 @@ type LatestSampleByTypeRow = {
   unit: string | null;
 };
 
+type SourceValueRow = {
+  source_key: string | null;
+  value: number | null;
+  sample_count: number;
+  latest_end_at: string | null;
+  source_is_combined: number;
+};
+
 type DailyMetricsRow = {
   date: string;
   data_completeness: DailyMetrics['dataCompleteness'];
@@ -691,11 +699,42 @@ export async function initTrainingStore(): Promise<void> {
   await getDb();
 }
 
+function isHealthConnectDailyAggregate(sample: HealthSample): boolean {
+  return sample.sampleId.startsWith('health_connect:daily:');
+}
+
 export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
   const db = await getDb();
   const importedAt = new Date().toISOString();
 
   await db.withExclusiveTransactionAsync(async (txn) => {
+    const dailyAggregateReplacements = new Map<string, HealthSample>();
+    payload.samples.forEach((sample) => {
+      if (!isHealthConnectDailyAggregate(sample)) {
+        return;
+      }
+
+      dailyAggregateReplacements.set(
+        `${sample.platform}:${sample.canonicalType}:${sample.localDate}`,
+        sample,
+      );
+    });
+
+    for (const sample of dailyAggregateReplacements.values()) {
+      await txn.runAsync(
+        `
+          DELETE FROM health_samples
+          WHERE platform = ?
+            AND canonical_type = ?
+            AND local_date = ?
+            AND sample_id LIKE 'health_connect:daily:%'
+        `,
+        sample.platform,
+        sample.canonicalType,
+        sample.localDate,
+      );
+    }
+
     for (const sample of payload.samples) {
       await txn.runAsync(
         `
@@ -913,6 +952,39 @@ async function valueFor(
   return optionalNumber(row?.value);
 }
 
+async function singleSourceSumFor(
+  db: SQLite.SQLiteDatabase,
+  date: string,
+  canonicalType: CanonicalType,
+): Promise<number | undefined> {
+  const row = await db.getFirstAsync<SourceValueRow>(
+    `
+      SELECT
+        COALESCE(NULLIF(source_app, ''), NULLIF(source_device, ''), platform || ':' || record_type)
+          AS source_key,
+        CASE
+          WHEN SUM(CASE WHEN sample_id LIKE 'health_connect:daily:%' THEN 1 ELSE 0 END) > 0
+          THEN MAX(CASE WHEN sample_id LIKE 'health_connect:daily:%' THEN value ELSE NULL END)
+          ELSE SUM(value)
+        END AS value,
+        COUNT(*) AS sample_count,
+        MAX(end_at) AS latest_end_at,
+        CASE WHEN instr(COALESCE(source_app, ''), ',') > 0 THEN 1 ELSE 0 END
+          AS source_is_combined
+      FROM health_samples
+      WHERE local_date = ? AND canonical_type = ? AND value IS NOT NULL
+      GROUP BY source_key
+      HAVING SUM(value) IS NOT NULL
+      ORDER BY source_is_combined ASC, value DESC, sample_count DESC, latest_end_at DESC, source_key ASC
+      LIMIT 1
+    `,
+    date,
+    canonicalType,
+  );
+
+  return optionalNumber(row?.value);
+}
+
 async function latestValueFor(
   db: SQLite.SQLiteDatabase,
   date: string,
@@ -942,7 +1014,7 @@ async function rebuildDailyMetrics(): Promise<void> {
   await db.execAsync('DELETE FROM daily_metrics;');
 
   for (const date of dates) {
-    const steps = await valueFor(db, date, 'steps');
+    const steps = await singleSourceSumFor(db, date, 'steps');
     const activeKcal = await valueFor(db, date, 'active_energy');
     const totalKcal = await valueFor(db, date, 'total_energy');
     const distanceMeters = await valueFor(db, date, 'distance');
