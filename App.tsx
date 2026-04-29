@@ -178,10 +178,10 @@ const analyticsMetrics: AnalyticsMetricConfig[] = [
   {
     id: 'hrv',
     title: 'HRV',
-    detail: 'RMSSD recovery signal',
-    types: ['hrv_rmssd'],
+    detail: 'RMSSD or Apple SDNN',
+    types: ['hrv_rmssd', 'hrv_sdnn'],
     icon: HeartPulse,
-    gap: 'Connect a source that writes HRV RMSSD to Health Connect.',
+    gap: 'Connect a source that writes HRV to Health Connect or Apple Health.',
   },
   {
     id: 'rhr',
@@ -275,6 +275,7 @@ function metricLabel(type: CanonicalType): string {
     heart_rate: 'Heart rate',
     hydration: 'Hydration',
     hrv_rmssd: 'HRV',
+    hrv_sdnn: 'HRV SDNN',
     lean_body_mass: 'Lean mass',
     nutrition: 'Nutrition',
     resting_heart_rate: 'Resting HR',
@@ -1521,6 +1522,7 @@ function SourceScreen({
     'sleep_session',
     'resting_heart_rate',
     'hrv_rmssd',
+    'hrv_sdnn',
     'heart_rate',
   ];
   const focusedDiagnostics = snapshot.latestDiagnostics.filter((diagnostic) =>
@@ -1545,8 +1547,8 @@ function SourceScreen({
         day.hrvLastNightAvg != null ||
         day.vo2max != null,
     ) ||
-    hasSamples(['heart_rate', 'resting_heart_rate', 'hrv_rmssd', 'vo2max']) ||
-    hasAvailability(['heart_rate', 'resting_heart_rate', 'hrv_rmssd', 'vo2max']);
+    hasSamples(['heart_rate', 'resting_heart_rate', 'hrv_rmssd', 'hrv_sdnn', 'vo2max']) ||
+    hasAvailability(['heart_rate', 'resting_heart_rate', 'hrv_rmssd', 'hrv_sdnn', 'vo2max']);
   const hasWorkoutSignal = snapshot.workoutCount > 0 || hasAvailability(['workout']);
   const hasActivitySignal =
     hasHistory((day) => day.hasSteps || day.hasEnergy || day.distanceKm != null) ||
@@ -1768,7 +1770,7 @@ function SourceScreen({
           />
         </View>
 
-        <SectionLabel>Latest Health Connect read</SectionLabel>
+        <SectionLabel>{`Latest ${sourceLabel} read`}</SectionLabel>
         <View style={styles.diagnosticList}>
           {focusedDiagnostics.length ? (
             focusedDiagnostics.map((diagnostic) => (
