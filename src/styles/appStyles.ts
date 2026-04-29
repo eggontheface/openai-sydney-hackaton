@@ -173,6 +173,20 @@ export const styles = StyleSheet.create({
     letterSpacing: 0,
     lineHeight: 19,
   },
+  setupFreeTextHint: {
+    color: tokens.muted,
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0,
+    lineHeight: 18,
+    marginTop: 12,
+  },
+  goalCoachThread: {
+    gap: 10,
+  },
+  goalContinueRow: {
+    marginLeft: 42,
+  },
   topBar: {
     alignItems: 'center',
     borderBottomColor: tokens.lineSoft,
@@ -580,6 +594,39 @@ export const styles = StyleSheet.create({
     borderBottomWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 10,
+  },
+  onboardingComposer: {
+    alignItems: 'stretch',
+    flexDirection: 'column',
+    gap: 8,
+  },
+  quickReplyRail: {
+    maxHeight: 34,
+  },
+  quickReplyRailContent: {
+    gap: 8,
+    paddingRight: 2,
+  },
+  quickReplyPill: {
+    alignItems: 'center',
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 99,
+    borderWidth: 1,
+    height: 32,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  quickReplyText: {
+    color: tokens.ink,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  composerRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
   },
   composerInput: {
     backgroundColor: tokens.surface,

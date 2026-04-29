@@ -17,6 +17,15 @@ import { currentHealthProviderId, currentHealthProviderLabel, syncCurrentPlatfor
 import type { PipelineSnapshot, SyncRange } from './src/health/types';
 import { formatRange, makeSyncRange } from './src/lib/dates';
 import {
+  buildLocalGoalCoachReply,
+  buildLocalOnboardingSummary,
+  sendOnboardingGoalMessage,
+  sendOnboardingSummaryMessage,
+  type GoalCoachMessage,
+  type GoalCoachResponse,
+  type OnboardingAnswers,
+} from './src/onboarding/goalCoach';
+import {
   clearOpenAiApiKey,
   loadAppSettings,
   readOpenAiApiKey,
@@ -219,6 +228,77 @@ export default function App() {
     }
   }
 
+  async function discussOnboardingGoal({
+    conversation,
+    previousResponseId,
+    userMessage,
+  }: {
+    conversation: GoalCoachMessage[];
+    previousResponseId?: string | null;
+    userMessage: string;
+  }): Promise<GoalCoachResponse> {
+    const apiKey = await readOpenAiApiKey();
+
+    if (!apiKey) {
+      setStatus('Onboarding coach is running in local demo mode. Add an OpenAI API key in You for live AI.');
+      return {
+        responseId: null,
+        text: buildLocalGoalCoachReply(userMessage),
+      };
+    }
+
+    const freshSnapshot = await getPipelineSnapshot();
+    setSnapshot(freshSnapshot);
+    setStatus('Onboarding coach is discussing your goal with OpenAI');
+
+    const response = await sendOnboardingGoalMessage({
+      apiKey,
+      conversation,
+      previousResponseId,
+      snapshot: freshSnapshot,
+      userMessage,
+    });
+    setStatus('Onboarding coach updated your goal profile');
+    return response;
+  }
+
+  async function summarizeOnboarding({
+    answers,
+    conversation,
+  }: {
+    answers: OnboardingAnswers;
+    conversation: GoalCoachMessage[];
+  }): Promise<GoalCoachResponse> {
+    const freshSnapshot = await getPipelineSnapshot();
+    setSnapshot(freshSnapshot);
+
+    const apiKey = await readOpenAiApiKey();
+    if (!apiKey) {
+      setStatus('Onboarding summary is running in local demo mode. Add an OpenAI API key in You for live AI.');
+      return {
+        responseId: null,
+        text: buildLocalOnboardingSummary({
+          answers,
+          dataSummary: {
+            coverageDays: freshSnapshot.coverageDays,
+            sleepSessions: freshSnapshot.sleepCount,
+            workouts: freshSnapshot.workoutCount,
+          },
+        }),
+      };
+    }
+
+    setStatus('Onboarding coach is summarising your setup with OpenAI');
+    const response = await sendOnboardingSummaryMessage({
+      apiKey,
+      answers,
+      conversation,
+      snapshot: freshSnapshot,
+    });
+    setStatus('Onboarding summary ready');
+    return response;
+  }
+
   function localCoachFallback(message: string): string {
     const normalized = message.toLowerCase();
     const mentionsPain =
@@ -371,11 +451,13 @@ export default function App() {
           <CoachOnboardingScreen
             busy={busy}
             canSync={canSync}
+            onDiscussGoal={discussOnboardingGoal}
             onComplete={(nextGoal) => {
               setGoalText(nextGoal);
               setEntryMode('app');
               setActiveTab('coach');
             }}
+            onSummarizeOnboarding={summarizeOnboarding}
             onSync={runSync}
             sourceLabel={sourceLabel}
             status={status}
