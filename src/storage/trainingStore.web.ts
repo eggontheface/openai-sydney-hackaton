@@ -422,6 +422,7 @@ export async function getCoachHealthContext(_options: { rebuildDaily?: boolean }
       syncRuns,
     },
     metricAvailability: demoMetricAvailability,
+    sourceFreshness: demoSourceFreshness,
     latestSamplesByType: [
       {
         canonicalType: 'hrv_rmssd' as CanonicalType,

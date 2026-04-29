@@ -146,6 +146,15 @@ function buildCoachContext(snapshot: PipelineSnapshot, healthContext: CoachHealt
     sqliteDerivedContext: {
       generatedAt: healthContext.generatedAt,
       metricAvailability: healthContext.metricAvailability,
+      sourceFreshness: healthContext.sourceFreshness.map((source) => ({
+        domain: source.domain,
+        label: source.label,
+        state: source.state,
+        latestLocalDate: source.latestLocalDate,
+        lastUpdatedAt: source.lastUpdatedAt,
+        ageDays: source.ageDays,
+        limitations: source.limitations,
+      })),
       latestSamplesByType: healthContext.latestSamplesByType,
       recentDailyMetrics: healthContext.recentDailyMetrics.map((day) => ({
         date: day.date,
