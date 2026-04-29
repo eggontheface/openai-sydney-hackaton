@@ -16,6 +16,7 @@ import {
   RefreshCw,
 } from "lucide-react-native";
 
+import type { ReadinessStatusValue } from "../coach/readinessStatus";
 import {
   dataAge,
   formatDateKey,
@@ -49,6 +50,62 @@ function coachGoalPhrase(goalText: string): string {
   if (normalized.includes("fitness")) return "your fitness goal";
 
   return goal;
+}
+
+export function coachGreetingForDate(now = new Date()): string {
+  const hour = now.getHours();
+
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+
+  return "Good evening";
+}
+
+function readinessStatusColor(status: ReadinessStatusValue): string {
+  if (status === "green") return tokens.positive;
+  if (status === "yellow") return tokens.warm;
+  if (status === "red") return tokens.danger;
+
+  return tokens.muted;
+}
+
+function ReadinessStatusIndicator({
+  label,
+  status,
+  variant = "metric",
+}: {
+  label: string;
+  status: ReadinessStatusValue;
+  variant?: "hero" | "metric";
+}) {
+  const color = readinessStatusColor(status);
+
+  return (
+    <View
+      accessibilityLabel={`Readiness status: ${label}`}
+      accessibilityRole="image"
+      accessible
+      style={
+        variant === "hero"
+          ? styles.coachHeroStatusIndicator
+          : styles.readinessStatusIndicator
+      }
+    >
+      <View
+        style={[
+          variant === "hero"
+            ? styles.coachHeroStatusDot
+            : styles.readinessStatusDot,
+          { backgroundColor: color },
+        ]}
+      />
+      {variant === "metric" ? (
+        <View
+          style={[styles.readinessStatusRail, { backgroundColor: color }]}
+        />
+      ) : null}
+    </View>
+  );
 }
 
 export function CoachScreen({
@@ -138,9 +195,10 @@ export function CoachScreen({
     snapshot.nutritionDays > 0 ||
     snapshot.coverageDays > 0;
   const loadingInitialMetrics = busy && !hasSyncedData;
+  const coachGreeting = coachGreetingForDate();
   const coachHeroTitle = displayName
-    ? `Good morning, ${displayName}.`
-    : "Good morning.";
+    ? `${coachGreeting}, ${displayName}.`
+    : `${coachGreeting}.`;
   const coachHeroText = hasSyncedData
     ? `You are in a good spot to keep building toward ${goalPhrase}. I have checked the recovery picture and lined up today's work. If anything has changed since the data came in, tell me and I will adjust it.`
     : `Let's keep building toward ${goalPhrase}. I do not have enough wearable history yet, so I will keep things sensible and adjust as you give me more context.`;
@@ -191,9 +249,11 @@ export function CoachScreen({
               <Text style={styles.coachHeroText}>{coachHeroText}</Text>
             </View>
             <View style={styles.coachHeroBadge}>
-              <Text style={styles.coachHeroBadgeText}>
-                {recommendation.readinessLabel}
-              </Text>
+              <ReadinessStatusIndicator
+                label={readinessStatus.ui.label}
+                status={readinessStatus.status}
+                variant="hero"
+              />
             </View>
           </View>
           <View style={styles.coachHeroMetrics}>
@@ -235,11 +295,19 @@ export function CoachScreen({
               loading={loadingInitialMetrics}
               value={sleep}
             />
-            <SmallMetric
-              label="Status"
-              loading={loadingInitialMetrics}
-              value={readinessStatus.ui.label}
-            />
+            <View style={styles.smallMetric}>
+              <Text style={styles.smallMetricLabel}>Status</Text>
+              {loadingInitialMetrics ? (
+                <View style={styles.smallMetricLoading}>
+                  <ActivityIndicator color={tokens.accent} size="small" />
+                </View>
+              ) : (
+                <ReadinessStatusIndicator
+                  label={readinessStatus.ui.label}
+                  status={readinessStatus.status}
+                />
+              )}
+            </View>
             <SmallMetric
               label="Score"
               loading={loadingInitialMetrics}

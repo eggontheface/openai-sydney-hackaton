@@ -134,7 +134,7 @@ function uiForStatus(status: ReadinessStatusValue): ReadinessStatusUi {
 
   return {
     label: "Yellow",
-    color: "cool",
+    color: "warm",
     title: "Controlled aerobic work",
     detail: "Train, but keep intensity controlled.",
     reason: "The usable recovery signals support training with some restraint.",

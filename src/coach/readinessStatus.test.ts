@@ -57,7 +57,7 @@ describe("readiness status contract", () => {
     expect(status.missingSignals).toEqual(["HRV is missing"]);
     expect(status.conservativeAdjustmentReason).toMatch(/stale or missing/i);
     expect(status.ui.label).toBe("Yellow");
-    expect(status.ui.color).toBe("cool");
+    expect(status.ui.color).toBe("warm");
   });
 
   it("maps low readiness to red recovery guidance", () => {
