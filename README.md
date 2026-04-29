@@ -40,6 +40,19 @@ npm run android
 
 Use a physical device with Apple Health or Health Connect data. Android requires Health Connect to be installed or available through the Android system provider.
 
+## Test
+
+The app uses Jest with the Expo preset so data, coach, and UI work can share one test runner.
+
+```sh
+npm test
+npm run test:watch
+npm run test:ci
+npm run typecheck
+```
+
+Place app tests under `src/` using `*.test.ts` or `*.test.tsx`. Prefer pure TypeScript tests for data and coach logic, and React Native Testing Library for component behavior.
+
 ## Native Notes
 
 - iOS HealthKit access is configured by the `@kingstinct/react-native-healthkit` Expo config plugin in `app.json`.
