@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -581,10 +582,7 @@ function CoachScreen({
   }, [coachBusy, coachMessages.length]);
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.screen}
-    >
+    <View style={styles.screen}>
       <View style={styles.topBar}>
         <View style={styles.topBarLeft}>
           <CoachAvatar size={32} />
@@ -743,7 +741,7 @@ function CoachScreen({
           )}
         </Pressable>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -1849,6 +1847,7 @@ export default function App() {
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [status, setStatus] = useState('Ready');
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   const range = useMemo(() => makeSyncRange(rangeDays), [rangeDays]);
   const canSync = Platform.OS === 'ios' || Platform.OS === 'android';
@@ -1871,6 +1870,16 @@ export default function App() {
         await refreshStore();
       })
       .catch((error) => setStatus(String(error instanceof Error ? error.message : error)));
+  }, []);
+
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
+    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
   }, []);
 
   async function saveApiKey() {
@@ -2026,7 +2035,11 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="dark" />
-      <View style={styles.appShell}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={0}
+        style={styles.appShell}
+      >
         {activeTab === 'coach' ? (
           <CoachScreen
             busy={busy}
@@ -2069,8 +2082,8 @@ export default function App() {
             status={status}
           />
         ) : null}
-        <TabBar active={activeTab} onChange={setActiveTab} />
-      </View>
+        {!keyboardVisible ? <TabBar active={activeTab} onChange={setActiveTab} /> : null}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
