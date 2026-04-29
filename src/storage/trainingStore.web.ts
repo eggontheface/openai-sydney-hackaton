@@ -23,6 +23,7 @@ export type HealthSampleRow = {
   timezone: string | null;
   value: number | null;
   unit: string | null;
+  hrv_method: 'rmssd' | 'sdnn' | null;
   metadata_json: string;
   source_modified_at: string | null;
   imported_at: string;
@@ -94,6 +95,11 @@ function day(offset = 0): DailyMetrics {
     heartRateMinBpm: 45,
     heartRateMaxBpm: 161,
     hrvLastNightAvg: offset === 0 ? 62 : 56 + Math.abs(offset),
+    hrvMethod: 'rmssd',
+    hrvCanonicalType: 'hrv_rmssd',
+    hrvSourceApp: 'Apple Watch',
+    hrvSourceKey: 'Apple Watch',
+    hrvSampleCount: 1,
     workoutCount: offset === -1 || offset === -3 ? 1 : 0,
     runWorkoutCount: offset === -1 ? 1 : 0,
     rideWorkoutCount: 0,
@@ -179,7 +185,7 @@ const demoSourceFreshness: SourceFreshness[] = [
     latestLocalDate: latestDate,
     lastUpdatedAt: `${latestDate}T06:45:00.000Z`,
     ageDays: 0,
-    limitations: [],
+    limitations: ['Demo HRV is RMSSD; SDNN from Apple Health would use its own baseline.'],
   },
   {
     domain: 'workouts',
@@ -328,7 +334,7 @@ const demoSnapshot: PipelineSnapshot = {
     color: 'positive',
     title: 'Aerobic base',
     detail: '40 min easy run, stay conversational',
-    reason: 'Sleep is solid, HRV is above baseline, and recent training load is consistent.',
+    reason: 'Sleep is solid, RMSSD HRV is above its matching baseline, and recent training load is consistent.',
     opener: 'Morning. Your wearable data already shows a strong recovery profile today.',
     strain: 9.5,
     strainTarget: '8-11',
@@ -432,6 +438,7 @@ export async function getCoachHealthContext(_options: { rebuildDaily?: boolean }
         startAt: `${latestDate}T06:45:00.000Z`,
         value: history[0].hrvLastNightAvg,
         unit: 'ms',
+        hrvMethod: 'rmssd' as const,
       },
       {
         canonicalType: 'resting_heart_rate' as CanonicalType,
