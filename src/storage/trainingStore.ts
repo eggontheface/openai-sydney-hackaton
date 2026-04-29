@@ -1,7 +1,8 @@
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
-import * as SQLite from 'expo-sqlite';
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
+import * as SQLite from "expo-sqlite";
 
+import { extractRiskFlagsFromCoachRequest } from "../coach/riskFlags";
 import {
   normalizeGoalProfile,
   type CoachingStyle,
@@ -10,9 +11,9 @@ import {
   type GoalProfileDraft,
   type PrimaryGoal,
   type StartingStrategy,
-} from '../goals/goalProfile';
-import { formatDuration, localDateKey } from '../lib/dates';
-import { safeJsonStringify } from '../lib/json';
+} from "../goals/goalProfile";
+import { formatDuration, localDateKey } from "../lib/dates";
+import { safeJsonStringify } from "../lib/json";
 import {
   buildDailyMetricsRollup,
   hrvBaselineFor,
@@ -20,7 +21,7 @@ import {
   hrvMethodLabel,
   normalizeLegacyHealthSampleRow,
   type LegacyHealthSampleRow,
-} from './trainingStoreRules';
+} from "./trainingStoreRules";
 import type {
   CanonicalType,
   CoachRecommendation,
@@ -40,7 +41,7 @@ import type {
   SyncPayload,
   SyncRange,
   WorkoutRecord,
-} from '../health/types';
+} from "../health/types";
 
 export type HealthSampleRow = {
   sample_id: string;
@@ -108,7 +109,7 @@ export type SleepSessionRow = {
 export type SyncRunRow = {
   id: number;
   provider: HealthProvider;
-  sync_type: 'manual' | 'incremental';
+  sync_type: "manual" | "incremental";
   started_at: string;
   ended_at: string;
   range_start: string;
@@ -120,12 +121,12 @@ export type SyncRunRow = {
   nutrition_day_count: number;
   warning_count: number;
   diagnostic_count: number;
-  status: 'ok' | 'error';
+  status: "ok" | "error";
   error: string | null;
 };
 
 export type SyncRunDetails = {
-  syncType?: SyncRunRow['sync_type'];
+  syncType?: SyncRunRow["sync_type"];
   healthSampleCount?: number;
   workoutCount?: number;
   sleepSessionCount?: number;
@@ -137,8 +138,8 @@ export type SyncRunDetails = {
 type HealthConnectDiagnosticRow = {
   record_type: string;
   canonical_type: CanonicalType;
-  permission: HealthConnectReadDiagnostic['permission'];
-  read_kind: HealthConnectReadDiagnostic['readKind'];
+  permission: HealthConnectReadDiagnostic["permission"];
+  read_kind: HealthConnectReadDiagnostic["readKind"];
   records_read: number;
   samples_written: number;
   message: string | null;
@@ -220,7 +221,7 @@ type SleepRollupRow = {
 
 type DailyMetricsRow = {
   date: string;
-  data_completeness: DailyMetrics['dataCompleteness'];
+  data_completeness: DailyMetrics["dataCompleteness"];
   wellness_data_status: string;
   source_count: number;
   has_platform_wellness: number;
@@ -286,48 +287,48 @@ type DailyMetricsRow = {
 };
 
 const nutritionDailyAddedColumns: Record<string, string> = {
-  saturated_fat_g: 'REAL',
-  monounsaturated_fat_g: 'REAL',
-  polyunsaturated_fat_g: 'REAL',
-  trans_fat_g: 'REAL',
-  potassium_mg: 'REAL',
-  calcium_mg: 'REAL',
-  iron_mg: 'REAL',
-  magnesium_mg: 'REAL',
-  zinc_mg: 'REAL',
-  vitamin_a_mcg: 'REAL',
-  vitamin_b6_mg: 'REAL',
-  vitamin_b12_mcg: 'REAL',
-  vitamin_c_mg: 'REAL',
-  vitamin_d_mcg: 'REAL',
-  vitamin_e_mg: 'REAL',
-  vitamin_k_mcg: 'REAL',
+  saturated_fat_g: "REAL",
+  monounsaturated_fat_g: "REAL",
+  polyunsaturated_fat_g: "REAL",
+  trans_fat_g: "REAL",
+  potassium_mg: "REAL",
+  calcium_mg: "REAL",
+  iron_mg: "REAL",
+  magnesium_mg: "REAL",
+  zinc_mg: "REAL",
+  vitamin_a_mcg: "REAL",
+  vitamin_b6_mg: "REAL",
+  vitamin_b12_mcg: "REAL",
+  vitamin_c_mg: "REAL",
+  vitamin_d_mcg: "REAL",
+  vitamin_e_mg: "REAL",
+  vitamin_k_mcg: "REAL",
 };
 
 const dailyMetricsAddedNutritionColumns: Record<string, string> = {
-  saturated_fat_g: 'REAL',
-  monounsaturated_fat_g: 'REAL',
-  polyunsaturated_fat_g: 'REAL',
-  trans_fat_g: 'REAL',
-  cholesterol_mg: 'REAL',
-  caffeine_mg: 'REAL',
-  sodium_mg: 'REAL',
-  potassium_mg: 'REAL',
-  calcium_mg: 'REAL',
-  iron_mg: 'REAL',
-  magnesium_mg: 'REAL',
-  zinc_mg: 'REAL',
-  vitamin_a_mcg: 'REAL',
-  vitamin_b6_mg: 'REAL',
-  vitamin_b12_mcg: 'REAL',
-  vitamin_c_mg: 'REAL',
-  vitamin_d_mcg: 'REAL',
-  vitamin_e_mg: 'REAL',
-  vitamin_k_mcg: 'REAL',
+  saturated_fat_g: "REAL",
+  monounsaturated_fat_g: "REAL",
+  polyunsaturated_fat_g: "REAL",
+  trans_fat_g: "REAL",
+  cholesterol_mg: "REAL",
+  caffeine_mg: "REAL",
+  sodium_mg: "REAL",
+  potassium_mg: "REAL",
+  calcium_mg: "REAL",
+  iron_mg: "REAL",
+  magnesium_mg: "REAL",
+  zinc_mg: "REAL",
+  vitamin_a_mcg: "REAL",
+  vitamin_b6_mg: "REAL",
+  vitamin_b12_mcg: "REAL",
+  vitamin_c_mg: "REAL",
+  vitamin_d_mcg: "REAL",
+  vitamin_e_mg: "REAL",
+  vitamin_k_mcg: "REAL",
 };
 
 type GoalProfileRow = {
-  id: 'current';
+  id: "current";
   primary_goal: PrimaryGoal;
   secondary_goals_json: string;
   motivation: string | null;
@@ -355,7 +356,7 @@ export type CoachHealthContext = {
     syncRuns: {
       total: number;
       latestEndedAt: string | null;
-      latestStatus: SyncRunRow['status'] | null;
+      latestStatus: SyncRunRow["status"] | null;
       latestSampleCount: number | null;
       latestRangeStart: string | null;
       latestRangeEnd: string | null;
@@ -402,7 +403,7 @@ type SourceFreshnessConfig = {
   label: string;
   canonicalTypes: CanonicalType[];
   maxFreshAgeDays: number;
-  source: 'samples' | 'sleep' | 'workouts' | 'nutrition' | 'check_ins';
+  source: "samples" | "sleep" | "workouts" | "nutrition" | "check_ins";
   todayIsPartial?: boolean;
   partialWhenMissingTypes?: boolean;
   missingLimitation: string;
@@ -410,90 +411,93 @@ type SourceFreshnessConfig = {
 
 const sourceFreshnessConfigs: SourceFreshnessConfig[] = [
   {
-    domain: 'sleep',
-    label: 'Sleep',
-    canonicalTypes: ['sleep_session'],
+    domain: "sleep",
+    label: "Sleep",
+    canonicalTypes: ["sleep_session"],
     maxFreshAgeDays: 1,
-    source: 'sleep',
-    missingLimitation: 'No imported sleep sessions are available.',
+    source: "sleep",
+    missingLimitation: "No imported sleep sessions are available.",
   },
   {
-    domain: 'workouts',
-    label: 'Workouts',
-    canonicalTypes: ['workout'],
+    domain: "workouts",
+    label: "Workouts",
+    canonicalTypes: ["workout"],
     maxFreshAgeDays: 7,
-    source: 'workouts',
-    missingLimitation: 'No imported workout sessions are available.',
+    source: "workouts",
+    missingLimitation: "No imported workout sessions are available.",
   },
   {
-    domain: 'steps',
-    label: 'Steps',
-    canonicalTypes: ['steps'],
+    domain: "steps",
+    label: "Steps",
+    canonicalTypes: ["steps"],
     maxFreshAgeDays: 0,
-    source: 'samples',
+    source: "samples",
     todayIsPartial: true,
-    missingLimitation: 'No imported step samples are available.',
+    missingLimitation: "No imported step samples are available.",
   },
   {
-    domain: 'energy',
-    label: 'Energy',
-    canonicalTypes: ['active_energy', 'total_energy'],
+    domain: "energy",
+    label: "Energy",
+    canonicalTypes: ["active_energy", "total_energy"],
     maxFreshAgeDays: 0,
-    source: 'samples',
+    source: "samples",
     todayIsPartial: true,
     partialWhenMissingTypes: true,
-    missingLimitation: 'No imported active or total energy samples are available.',
+    missingLimitation:
+      "No imported active or total energy samples are available.",
   },
   {
-    domain: 'hrv',
-    label: 'HRV',
-    canonicalTypes: ['hrv_rmssd', 'hrv_sdnn'],
+    domain: "hrv",
+    label: "HRV",
+    canonicalTypes: ["hrv_rmssd", "hrv_sdnn"],
     maxFreshAgeDays: 1,
-    source: 'samples',
-    missingLimitation: 'No imported HRV samples are available.',
+    source: "samples",
+    missingLimitation: "No imported HRV samples are available.",
   },
   {
-    domain: 'resting_hr',
-    label: 'Resting HR',
-    canonicalTypes: ['resting_heart_rate'],
+    domain: "resting_hr",
+    label: "Resting HR",
+    canonicalTypes: ["resting_heart_rate"],
     maxFreshAgeDays: 1,
-    source: 'samples',
-    missingLimitation: 'No imported resting heart rate samples are available.',
+    source: "samples",
+    missingLimitation: "No imported resting heart rate samples are available.",
   },
   {
-    domain: 'nutrition',
-    label: 'Nutrition',
-    canonicalTypes: ['nutrition'],
+    domain: "nutrition",
+    label: "Nutrition",
+    canonicalTypes: ["nutrition"],
     maxFreshAgeDays: 1,
-    source: 'nutrition',
+    source: "nutrition",
     todayIsPartial: true,
-    missingLimitation: 'No imported nutrition rows are available.',
+    missingLimitation: "No imported nutrition rows are available.",
   },
   {
-    domain: 'hydration',
-    label: 'Hydration',
-    canonicalTypes: ['hydration'],
+    domain: "hydration",
+    label: "Hydration",
+    canonicalTypes: ["hydration"],
     maxFreshAgeDays: 1,
-    source: 'nutrition',
+    source: "nutrition",
     todayIsPartial: true,
-    missingLimitation: 'No imported hydration rows are available.',
+    missingLimitation: "No imported hydration rows are available.",
   },
   {
-    domain: 'body_composition',
-    label: 'Body composition',
-    canonicalTypes: ['weight', 'body_fat', 'lean_body_mass'],
+    domain: "body_composition",
+    label: "Body composition",
+    canonicalTypes: ["weight", "body_fat", "lean_body_mass"],
     maxFreshAgeDays: 14,
-    source: 'samples',
+    source: "samples",
     partialWhenMissingTypes: true,
-    missingLimitation: 'No imported weight, body fat, or lean mass samples are available.',
+    missingLimitation:
+      "No imported weight, body fat, or lean mass samples are available.",
   },
   {
-    domain: 'check_ins',
-    label: 'Check-ins',
+    domain: "check_ins",
+    label: "Check-ins",
     canonicalTypes: [],
     maxFreshAgeDays: 0,
-    source: 'check_ins',
-    missingLimitation: 'Daily check-ins are not implemented in local storage yet.',
+    source: "check_ins",
+    missingLimitation:
+      "Daily check-ins are not implemented in local storage yet.",
   },
 ];
 
@@ -525,7 +529,7 @@ function parseJsonStringArray(value: string | null | undefined): string[] {
   try {
     const parsed = JSON.parse(value);
     return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === 'string')
+      ? parsed.filter((item): item is string => typeof item === "string")
       : [];
   } catch {
     return [];
@@ -554,7 +558,11 @@ function workoutOverlapRatio(a: WorkoutRow, b: WorkoutRow): number {
 }
 
 function compatibleWorkoutSport(a: WorkoutRow, b: WorkoutRow): boolean {
-  return a.sport_bucket === b.sport_bucket || a.sport_bucket === 'other' || b.sport_bucket === 'other';
+  return (
+    a.sport_bucket === b.sport_bucket ||
+    a.sport_bucket === "other" ||
+    b.sport_bucket === "other"
+  );
 }
 
 function isLikelyDuplicateWorkout(a: WorkoutRow, b: WorkoutRow): boolean {
@@ -571,7 +579,9 @@ function isLikelyDuplicateWorkout(a: WorkoutRow, b: WorkoutRow): boolean {
 
   return (
     (startDeltaMs <= 10 * 60 * 1000 && endDeltaMs <= 10 * 60 * 1000) ||
-    (startDeltaMs <= 15 * 60 * 1000 && overlapRatio >= 0.85 && durationDelta <= 0.25) ||
+    (startDeltaMs <= 15 * 60 * 1000 &&
+      overlapRatio >= 0.85 &&
+      durationDelta <= 0.25) ||
     (overlapRatio >= 0.95 && durationDelta <= 0.15)
   );
 }
@@ -585,7 +595,7 @@ function workoutCompletenessScore(workout: WorkoutRow): number {
     workout.laps_json ? 2 : 0,
     workout.streams_json ? 2 : 0,
     workout.name ? 1 : 0,
-    workout.sport_bucket !== 'other' ? 1 : 0,
+    workout.sport_bucket !== "other" ? 1 : 0,
   ].reduce((sum, value) => sum + value, 0);
 }
 
@@ -595,7 +605,8 @@ function preferredWorkout(a: WorkoutRow, b: WorkoutRow): WorkoutRow {
     return scoreDelta > 0 ? b : a;
   }
 
-  const durationDelta = numberOrZero(b.elapsed_seconds) - numberOrZero(a.elapsed_seconds);
+  const durationDelta =
+    numberOrZero(b.elapsed_seconds) - numberOrZero(a.elapsed_seconds);
   if (durationDelta !== 0) {
     return durationDelta > 0 ? b : a;
   }
@@ -637,11 +648,20 @@ function summarizeWorkouts(workouts: WorkoutRow[]): WorkoutSummary {
 
   return {
     workout_count: deduped.length,
-    run_workout_count: deduped.filter((workout) => workout.sport_bucket === 'run').length,
-    ride_workout_count: deduped.filter((workout) => workout.sport_bucket === 'ride').length,
-    strength_workout_count: deduped.filter((workout) => workout.sport_bucket === 'strength').length,
+    run_workout_count: deduped.filter(
+      (workout) => workout.sport_bucket === "run",
+    ).length,
+    ride_workout_count: deduped.filter(
+      (workout) => workout.sport_bucket === "ride",
+    ).length,
+    strength_workout_count: deduped.filter(
+      (workout) => workout.sport_bucket === "strength",
+    ).length,
     activity_elapsed_seconds: deduped.length
-      ? deduped.reduce((sum, workout) => sum + numberOrZero(workout.elapsed_seconds), 0)
+      ? deduped.reduce(
+          (sum, workout) => sum + numberOrZero(workout.elapsed_seconds),
+          0,
+        )
       : null,
     activity_kcal: activityKcal ? activityKcal : null,
   };
@@ -663,7 +683,8 @@ function mergeAvailability(
     sampleCount: Math.max(current.sampleCount, values.sampleCount),
     dayCount: Math.max(current.dayCount, values.dayCount),
     latestDate:
-      !current.latestDate || (values.latestDate && values.latestDate > current.latestDate)
+      !current.latestDate ||
+      (values.latestDate && values.latestDate > current.latestDate)
         ? values.latestDate
         : current.latestDate,
   });
@@ -688,18 +709,19 @@ function buildMetricAvailability(
 
   const dedupedWorkouts = dedupeWorkoutRows(workouts);
   if (dedupedWorkouts.length) {
-    mergeAvailability(availability, 'workout', {
-      canonicalType: 'workout',
+    mergeAvailability(availability, "workout", {
+      canonicalType: "workout",
       sampleCount: dedupedWorkouts.length,
-      dayCount: new Set(dedupedWorkouts.map((workout) => workout.local_date)).size,
+      dayCount: new Set(dedupedWorkouts.map((workout) => workout.local_date))
+        .size,
       latestDate: dedupedWorkouts[0]?.local_date,
     });
   }
 
   if (sleepCount) {
-    const sleep = availability.get('sleep_session');
-    mergeAvailability(availability, 'sleep_session', {
-      canonicalType: 'sleep_session',
+    const sleep = availability.get("sleep_session");
+    mergeAvailability(availability, "sleep_session", {
+      canonicalType: "sleep_session",
       sampleCount: Math.max(sleep?.sampleCount ?? 0, sleepCount),
       dayCount: sleep?.dayCount ?? 0,
       latestDate: sleep?.latestDate,
@@ -707,9 +729,9 @@ function buildMetricAvailability(
   }
 
   if (nutritionDays) {
-    const nutrition = availability.get('nutrition');
-    mergeAvailability(availability, 'nutrition', {
-      canonicalType: 'nutrition',
+    const nutrition = availability.get("nutrition");
+    mergeAvailability(availability, "nutrition", {
+      canonicalType: "nutrition",
       sampleCount: Math.max(nutrition?.sampleCount ?? 0, nutritionDays),
       dayCount: Math.max(nutrition?.dayCount ?? 0, nutritionDays),
       latestDate: nutrition?.latestDate,
@@ -723,28 +745,31 @@ function buildMetricAvailability(
 
 function canonicalTypeLabel(type: CanonicalType): string {
   const labels: Partial<Record<CanonicalType, string>> = {
-    active_energy: 'active energy',
-    body_fat: 'body fat',
-    distance: 'distance',
-    heart_rate: 'heart rate',
-    hydration: 'hydration',
-    hrv_rmssd: 'HRV',
-    hrv_sdnn: 'HRV SDNN',
-    lean_body_mass: 'lean mass',
-    nutrition: 'nutrition',
-    resting_heart_rate: 'resting heart rate',
-    sleep_session: 'sleep',
-    steps: 'steps',
-    total_energy: 'total energy',
-    vo2max: 'VO2 max',
-    weight: 'weight',
-    workout: 'workouts',
+    active_energy: "active energy",
+    body_fat: "body fat",
+    distance: "distance",
+    heart_rate: "heart rate",
+    hydration: "hydration",
+    hrv_rmssd: "HRV",
+    hrv_sdnn: "HRV SDNN",
+    lean_body_mass: "lean mass",
+    nutrition: "nutrition",
+    resting_heart_rate: "resting heart rate",
+    sleep_session: "sleep",
+    steps: "steps",
+    total_energy: "total energy",
+    vo2max: "VO2 max",
+    weight: "weight",
+    workout: "workouts",
   };
 
-  return labels[type] ?? type.replace(/_/g, ' ');
+  return labels[type] ?? type.replace(/_/g, " ");
 }
 
-function daysSinceLocalDate(latestDate: string | null | undefined, today: string): number | undefined {
+function daysSinceLocalDate(
+  latestDate: string | null | undefined,
+  today: string,
+): number | undefined {
   if (!latestDate) {
     return undefined;
   }
@@ -755,11 +780,14 @@ function daysSinceLocalDate(latestDate: string | null | undefined, today: string
     return undefined;
   }
 
-  return Math.max(0, Math.floor((todayTime - latestTime) / (24 * 60 * 60 * 1000)));
+  return Math.max(
+    0,
+    Math.floor((todayTime - latestTime) / (24 * 60 * 60 * 1000)),
+  );
 }
 
 function placeholders(values: unknown[]): string {
-  return values.map(() => '?').join(', ');
+  return values.map(() => "?").join(", ");
 }
 
 async function freshnessStatsForSamples(
@@ -828,8 +856,8 @@ async function freshnessStatsForNutrition(
   db: SQLite.SQLiteDatabase,
   canonicalTypes: CanonicalType[],
 ): Promise<FreshnessStatsRow | null> {
-  const includesNutrition = canonicalTypes.includes('nutrition');
-  const includesHydration = canonicalTypes.includes('hydration');
+  const includesNutrition = canonicalTypes.includes("nutrition");
+  const includesHydration = canonicalTypes.includes("hydration");
   const nutritionDailyFilters: string[] = [];
   if (includesNutrition) {
     nutritionDailyFilters.push(`(
@@ -845,13 +873,14 @@ async function freshnessStatsForNutrition(
     )`);
   }
   if (includesHydration) {
-    nutritionDailyFilters.push('water_ml IS NOT NULL');
+    nutritionDailyFilters.push("water_ml IS NOT NULL");
   }
   const nutritionDailyWhere = nutritionDailyFilters.length
-    ? `WHERE ${nutritionDailyFilters.join(' OR ')}`
-    : '';
+    ? `WHERE ${nutritionDailyFilters.join(" OR ")}`
+    : "";
 
-  return db.getFirstAsync<FreshnessStatsRow>(`
+  return db.getFirstAsync<FreshnessStatsRow>(
+    `
     SELECT
       COUNT(*) AS sample_count,
       COUNT(DISTINCT date_key) AS day_count,
@@ -866,26 +895,28 @@ async function freshnessStatsForNutrition(
       FROM health_samples
       WHERE canonical_type IN (${placeholders(canonicalTypes)})
     )
-  `, ...canonicalTypes);
+  `,
+    ...canonicalTypes,
+  );
 }
 
 async function freshnessStatsFor(
   db: SQLite.SQLiteDatabase,
   config: SourceFreshnessConfig,
 ): Promise<FreshnessStatsRow | null> {
-  if (config.source === 'sleep') {
+  if (config.source === "sleep") {
     return freshnessStatsForSleep(db);
   }
 
-  if (config.source === 'workouts') {
+  if (config.source === "workouts") {
     return freshnessStatsForWorkouts(db);
   }
 
-  if (config.source === 'nutrition') {
+  if (config.source === "nutrition") {
     return freshnessStatsForNutrition(db, config.canonicalTypes);
   }
 
-  if (config.source === 'check_ins') {
+  if (config.source === "check_ins") {
     return null;
   }
 
@@ -910,10 +941,16 @@ async function presentCanonicalTypesFor(
     ...canonicalTypes,
   );
 
-  return new Set(rows.filter((row) => Number(row.sample_count) > 0).map((row) => row.canonical_type));
+  return new Set(
+    rows
+      .filter((row) => Number(row.sample_count) > 0)
+      .map((row) => row.canonical_type),
+  );
 }
 
-async function hrvMethodStatsFor(db: SQLite.SQLiteDatabase): Promise<HrvMethodStatsRow[]> {
+async function hrvMethodStatsFor(
+  db: SQLite.SQLiteDatabase,
+): Promise<HrvMethodStatsRow[]> {
   return db.getAllAsync<HrvMethodStatsRow>(`
     WITH hrv_samples AS (
       SELECT
@@ -955,21 +992,26 @@ function hrvMethodLimitations(stats: HrvMethodStatsRow[]): string[] {
   const methods = Array.from(
     new Set(
       stats
-        .map((row) => row.hrv_method ?? hrvMethodForCanonicalType(row.canonical_type))
+        .map(
+          (row) =>
+            row.hrv_method ?? hrvMethodForCanonicalType(row.canonical_type),
+        )
         .filter((method): method is HrvMethod => Boolean(method)),
     ),
   );
   const limitations: string[] = [];
 
   if (methods.length > 1 || stats.length > 1) {
-    const methodList = methods.map(hrvMethodLabel).join(' and ');
+    const methodList = methods.map(hrvMethodLabel).join(" and ");
     limitations.push(
       `Imported HRV has ${methodList}; readiness compares only matching source and method.`,
     );
   }
 
   if (stats.some((row) => !row.hrv_method)) {
-    limitations.push('Some HRV rows were imported before method metadata was explicit.');
+    limitations.push(
+      "Some HRV rows were imported before method metadata was explicit.",
+    );
   }
 
   return limitations;
@@ -999,16 +1041,20 @@ function buildFreshnessLimitations({
   }
 
   if (ageDays != null && ageDays > config.maxFreshAgeDays) {
-    limitations.push(`Latest ${config.label.toLowerCase()} data is ${ageDays} days old.`);
+    limitations.push(
+      `Latest ${config.label.toLowerCase()} data is ${ageDays} days old.`,
+    );
   }
 
   if (config.todayIsPartial && latestDate === today) {
-    limitations.push('Today is still in progress; this domain may change after the next sync.');
+    limitations.push(
+      "Today is still in progress; this domain may change after the next sync.",
+    );
   }
 
   if (missingTypes.length) {
     limitations.push(
-      `Missing ${missingTypes.map(canonicalTypeLabel).join(', ')} in imported rows.`,
+      `Missing ${missingTypes.map(canonicalTypeLabel).join(", ")} in imported rows.`,
     );
   }
 
@@ -1016,26 +1062,38 @@ function buildFreshnessLimitations({
     config.canonicalTypes.includes(diagnostic.canonical_type),
   );
   const missingPermissions = relevantDiagnostics.filter(
-    (diagnostic) => diagnostic.permission === 'missing',
+    (diagnostic) => diagnostic.permission === "missing",
   );
   if (missingPermissions.length) {
     const missingLabels = Array.from(
-      new Set(missingPermissions.map((diagnostic) => canonicalTypeLabel(diagnostic.canonical_type))),
+      new Set(
+        missingPermissions.map((diagnostic) =>
+          canonicalTypeLabel(diagnostic.canonical_type),
+        ),
+      ),
     );
-    limitations.push(`Missing health data permission for ${missingLabels.join(', ')}.`);
+    limitations.push(
+      `Missing health data permission for ${missingLabels.join(", ")}.`,
+    );
   }
 
   const emptyReads = relevantDiagnostics.filter(
     (diagnostic) =>
-      diagnostic.permission === 'granted' &&
+      diagnostic.permission === "granted" &&
       diagnostic.records_read === 0 &&
       diagnostic.samples_written === 0,
   );
   if (emptyReads.length) {
     const emptyLabels = Array.from(
-      new Set(emptyReads.map((diagnostic) => canonicalTypeLabel(diagnostic.canonical_type))),
+      new Set(
+        emptyReads.map((diagnostic) =>
+          canonicalTypeLabel(diagnostic.canonical_type),
+        ),
+      ),
     );
-    limitations.push(`Latest health data read returned no ${emptyLabels.join(', ')} data.`);
+    limitations.push(
+      `Latest health data read returned no ${emptyLabels.join(", ")} data.`,
+    );
   }
 
   return Array.from(new Set(limitations));
@@ -1055,14 +1113,19 @@ async function getLatestHealthConnectDiagnostics(
   `);
 }
 
-async function getSourceFreshness(db: SQLite.SQLiteDatabase): Promise<SourceFreshness[]> {
+async function getSourceFreshness(
+  db: SQLite.SQLiteDatabase,
+): Promise<SourceFreshness[]> {
   const today = localDateKey(new Date());
   const diagnostics = await getLatestHealthConnectDiagnostics(db);
   const rows: SourceFreshness[] = [];
 
   for (const config of sourceFreshnessConfigs) {
     const stats = await freshnessStatsFor(db, config);
-    const presentTypes = await presentCanonicalTypesFor(db, config.canonicalTypes);
+    const presentTypes = await presentCanonicalTypesFor(
+      db,
+      config.canonicalTypes,
+    );
     const sampleCount = Number(stats?.sample_count ?? 0);
     const dayCount = Number(stats?.day_count ?? 0);
     const latestDate = stats?.latest_date ?? undefined;
@@ -1080,22 +1143,24 @@ async function getSourceFreshness(db: SQLite.SQLiteDatabase): Promise<SourceFres
       today,
       latestDate,
     });
-    if (config.domain === 'hrv') {
+    if (config.domain === "hrv") {
       limitations.push(...hrvMethodLimitations(await hrvMethodStatsFor(db)));
     }
 
-    let state: SourceFreshness['state'] = 'fresh';
+    let state: SourceFreshness["state"] = "fresh";
     if (!sampleCount) {
-      state = 'missing';
+      state = "missing";
     } else if (ageDays != null && ageDays > config.maxFreshAgeDays) {
-      state = 'stale';
+      state = "stale";
     } else if (
       missingTypes.length ||
       (config.todayIsPartial && latestDate === today) ||
-      (config.domain === 'hrv' &&
-        limitations.some((limitation) => limitation.startsWith('Imported HRV has ')))
+      (config.domain === "hrv" &&
+        limitations.some((limitation) =>
+          limitation.startsWith("Imported HRV has "),
+        ))
     ) {
-      state = 'partial';
+      state = "partial";
     }
 
     rows.push({
@@ -1188,7 +1253,9 @@ function toGoalProfile(row: GoalProfileRow): GoalProfile {
   return normalizeGoalProfile(
     {
       primaryGoal: row.primary_goal,
-      secondaryGoals: parseJsonStringArray(row.secondary_goals_json) as PrimaryGoal[],
+      secondaryGoals: parseJsonStringArray(
+        row.secondary_goals_json,
+      ) as PrimaryGoal[],
       motivation: row.motivation,
       timeframe: row.timeframe,
       experienceLevel: row.experience_level,
@@ -1206,13 +1273,15 @@ function toGoalProfile(row: GoalProfileRow): GoalProfile {
 
 async function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (!dbPromise) {
-    dbPromise = SQLite.openDatabaseAsync('training_pipeline.db').then(async (db) => {
-      await db.execAsync('PRAGMA journal_mode = WAL;');
-      await db.execAsync('PRAGMA busy_timeout = 5000;');
-      await migrateLegacyHealthSamples(db);
-      await createSchema(db);
-      return db;
-    });
+    dbPromise = SQLite.openDatabaseAsync("training_pipeline.db").then(
+      async (db) => {
+        await db.execAsync("PRAGMA journal_mode = WAL;");
+        await db.execAsync("PRAGMA busy_timeout = 5000;");
+        await migrateLegacyHealthSamples(db);
+        await createSchema(db);
+        return db;
+      },
+    );
   }
 
   return dbPromise;
@@ -1223,7 +1292,9 @@ async function addMissingColumns(
   tableName: string,
   columns: Record<string, string>,
 ): Promise<void> {
-  const existingColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${tableName})`);
+  const existingColumns = await db.getAllAsync<{ name: string }>(
+    `PRAGMA table_info(${tableName})`,
+  );
   const existingNames = new Set(existingColumns.map((column) => column.name));
 
   for (const [columnName, columnType] of Object.entries(columns)) {
@@ -1231,13 +1302,22 @@ async function addMissingColumns(
       continue;
     }
 
-    await db.execAsync(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnType};`);
+    await db.execAsync(
+      `ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnType};`,
+    );
   }
 }
 
-async function migrateLegacyHealthSamples(db: SQLite.SQLiteDatabase): Promise<void> {
-  const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(health_samples)');
-  if (!columns.length || columns.some((column) => column.name === 'sample_id')) {
+async function migrateLegacyHealthSamples(
+  db: SQLite.SQLiteDatabase,
+): Promise<void> {
+  const columns = await db.getAllAsync<{ name: string }>(
+    "PRAGMA table_info(health_samples)",
+  );
+  if (
+    !columns.length ||
+    columns.some((column) => column.name === "sample_id")
+  ) {
     return;
   }
 
@@ -1252,7 +1332,9 @@ async function ensureColumn(
   column: string,
   definition: string,
 ): Promise<void> {
-  const columns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+  const columns = await db.getAllAsync<{ name: string }>(
+    `PRAGMA table_info(${table})`,
+  );
   if (columns.some((item) => item.name === column)) {
     return;
   }
@@ -1261,12 +1343,32 @@ async function ensureColumn(
 }
 
 async function ensureHrvSchema(db: SQLite.SQLiteDatabase): Promise<void> {
-  await ensureColumn(db, 'health_samples', 'hrv_method', 'hrv_method TEXT');
-  await ensureColumn(db, 'daily_metrics', 'hrv_method', 'hrv_method TEXT');
-  await ensureColumn(db, 'daily_metrics', 'hrv_canonical_type', 'hrv_canonical_type TEXT');
-  await ensureColumn(db, 'daily_metrics', 'hrv_source_app', 'hrv_source_app TEXT');
-  await ensureColumn(db, 'daily_metrics', 'hrv_source_key', 'hrv_source_key TEXT');
-  await ensureColumn(db, 'daily_metrics', 'hrv_sample_count', 'hrv_sample_count INTEGER');
+  await ensureColumn(db, "health_samples", "hrv_method", "hrv_method TEXT");
+  await ensureColumn(db, "daily_metrics", "hrv_method", "hrv_method TEXT");
+  await ensureColumn(
+    db,
+    "daily_metrics",
+    "hrv_canonical_type",
+    "hrv_canonical_type TEXT",
+  );
+  await ensureColumn(
+    db,
+    "daily_metrics",
+    "hrv_source_app",
+    "hrv_source_app TEXT",
+  );
+  await ensureColumn(
+    db,
+    "daily_metrics",
+    "hrv_source_key",
+    "hrv_source_key TEXT",
+  );
+  await ensureColumn(
+    db,
+    "daily_metrics",
+    "hrv_sample_count",
+    "hrv_sample_count INTEGER",
+  );
 
   await db.execAsync(`
     UPDATE health_samples
@@ -1514,13 +1616,17 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     );
   `);
 
-  await addMissingColumns(db, 'nutrition_daily', nutritionDailyAddedColumns);
-  await addMissingColumns(db, 'daily_metrics', dailyMetricsAddedNutritionColumns);
+  await addMissingColumns(db, "nutrition_daily", nutritionDailyAddedColumns);
+  await addMissingColumns(
+    db,
+    "daily_metrics",
+    dailyMetricsAddedNutritionColumns,
+  );
   await ensureHrvSchema(db);
   await ensureSyncRunColumns(db);
 
   const legacyColumns = await db.getAllAsync<{ name: string }>(
-    'PRAGMA table_info(health_samples_legacy)',
+    "PRAGMA table_info(health_samples_legacy)",
   );
   if (legacyColumns.length) {
     const legacyRows = await db.getAllAsync<LegacyHealthSampleRow>(`
@@ -1557,26 +1663,30 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       );
     }
 
-    await db.execAsync('DROP TABLE health_samples_legacy;');
+    await db.execAsync("DROP TABLE health_samples_legacy;");
   }
 }
 
 async function ensureSyncRunColumns(db: SQLite.SQLiteDatabase): Promise<void> {
-  const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(sync_runs)');
+  const columns = await db.getAllAsync<{ name: string }>(
+    "PRAGMA table_info(sync_runs)",
+  );
   const present = new Set(columns.map((column) => column.name));
   const additions: Record<string, string> = {
     sync_type: "TEXT NOT NULL DEFAULT 'manual'",
-    health_sample_count: 'INTEGER NOT NULL DEFAULT 0',
-    workout_count: 'INTEGER NOT NULL DEFAULT 0',
-    sleep_session_count: 'INTEGER NOT NULL DEFAULT 0',
-    nutrition_day_count: 'INTEGER NOT NULL DEFAULT 0',
-    warning_count: 'INTEGER NOT NULL DEFAULT 0',
-    diagnostic_count: 'INTEGER NOT NULL DEFAULT 0',
+    health_sample_count: "INTEGER NOT NULL DEFAULT 0",
+    workout_count: "INTEGER NOT NULL DEFAULT 0",
+    sleep_session_count: "INTEGER NOT NULL DEFAULT 0",
+    nutrition_day_count: "INTEGER NOT NULL DEFAULT 0",
+    warning_count: "INTEGER NOT NULL DEFAULT 0",
+    diagnostic_count: "INTEGER NOT NULL DEFAULT 0",
   };
 
   for (const [name, definition] of Object.entries(additions)) {
     if (!present.has(name)) {
-      await db.execAsync(`ALTER TABLE sync_runs ADD COLUMN ${name} ${definition};`);
+      await db.execAsync(
+        `ALTER TABLE sync_runs ADD COLUMN ${name} ${definition};`,
+      );
     }
   }
 
@@ -1597,7 +1707,9 @@ export async function initTrainingStore(): Promise<void> {
   });
 }
 
-async function getGoalProfileFromDb(db: SQLite.SQLiteDatabase): Promise<GoalProfile | null> {
+async function getGoalProfileFromDb(
+  db: SQLite.SQLiteDatabase,
+): Promise<GoalProfile | null> {
   const row = await db.getFirstAsync<GoalProfileRow>(
     "SELECT * FROM goal_profile WHERE id = 'current' LIMIT 1",
   );
@@ -1609,7 +1721,9 @@ export async function getGoalProfile(): Promise<GoalProfile | null> {
   return withStorageLock(async () => getGoalProfileFromDb(await getDb()));
 }
 
-export async function saveGoalProfile(draft: GoalProfileDraft): Promise<GoalProfile> {
+export async function saveGoalProfile(
+  draft: GoalProfileDraft,
+): Promise<GoalProfile> {
   return withStorageLock(async () => {
     const db = await getDb();
     const current = await getGoalProfileFromDb(db);
@@ -1658,11 +1772,11 @@ export async function clearGoalProfile(): Promise<void> {
 }
 
 function isHealthConnectDailyAggregate(sample: HealthSample): boolean {
-  return sample.sampleId.startsWith('health_connect:daily:');
+  return sample.sampleId.startsWith("health_connect:daily:");
 }
 
 function sleepReplacementKey(sleep: SleepSessionRecord): string {
-  return `${sleep.platform}:${sleep.sourceApp ?? ''}:${sleep.wakeDate}`;
+  return `${sleep.platform}:${sleep.sourceApp ?? ""}:${sleep.wakeDate}`;
 }
 
 export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
@@ -1698,28 +1812,28 @@ export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
         );
       }
 
-    const sleepSessionReplacements = new Map<string, SleepSessionRecord>();
-    payload.sleepSessions.forEach((sleep) => {
-      sleepSessionReplacements.set(sleepReplacementKey(sleep), sleep);
-    });
+      const sleepSessionReplacements = new Map<string, SleepSessionRecord>();
+      payload.sleepSessions.forEach((sleep) => {
+        sleepSessionReplacements.set(sleepReplacementKey(sleep), sleep);
+      });
 
-    for (const sleep of sleepSessionReplacements.values()) {
-      await txn.runAsync(
-        `
+      for (const sleep of sleepSessionReplacements.values()) {
+        await txn.runAsync(
+          `
           DELETE FROM sleep_sessions
           WHERE platform = ?
             AND COALESCE(source_app, '') = ?
             AND wake_date = ?
         `,
-        sleep.platform,
-        sleep.sourceApp ?? '',
-        sleep.wakeDate,
-      );
-    }
+          sleep.platform,
+          sleep.sourceApp ?? "",
+          sleep.wakeDate,
+        );
+      }
 
-    for (const sample of payload.samples) {
-      await txn.runAsync(
-        `
+      for (const sample of payload.samples) {
+        await txn.runAsync(
+          `
           INSERT OR REPLACE INTO health_samples (
             sample_id, platform, record_type, canonical_type, source_app, source_device,
             start_at, end_at, local_date, timezone, value, unit, hrv_method, metadata_json,
@@ -1727,28 +1841,30 @@ export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
-        sample.sampleId,
-        sample.platform,
-        sample.recordType,
-        sample.canonicalType,
-        sample.sourceApp ?? null,
-        sample.sourceDevice ?? null,
-        sample.startAt,
-        sample.endAt,
-        sample.localDate,
-        sample.timezone ?? null,
-        sample.value ?? null,
-        sample.unit ?? null,
-        sample.hrvMethod ?? hrvMethodForCanonicalType(sample.canonicalType) ?? null,
-        sample.metadataJson,
-        sample.sourceModifiedAt ?? null,
-        importedAt,
-      );
-    }
+          sample.sampleId,
+          sample.platform,
+          sample.recordType,
+          sample.canonicalType,
+          sample.sourceApp ?? null,
+          sample.sourceDevice ?? null,
+          sample.startAt,
+          sample.endAt,
+          sample.localDate,
+          sample.timezone ?? null,
+          sample.value ?? null,
+          sample.unit ?? null,
+          sample.hrvMethod ??
+            hrvMethodForCanonicalType(sample.canonicalType) ??
+            null,
+          sample.metadataJson,
+          sample.sourceModifiedAt ?? null,
+          importedAt,
+        );
+      }
 
-    for (const workout of payload.workouts) {
-      await txn.runAsync(
-        `
+      for (const workout of payload.workouts) {
+        await txn.runAsync(
+          `
           INSERT OR REPLACE INTO workouts (
             workout_id, platform, source_app, start_at, end_at, local_date,
             name, activity_type, sport_bucket, elapsed_seconds, moving_seconds,
@@ -1757,33 +1873,33 @@ export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
-        workout.workoutId,
-        workout.platform,
-        workout.sourceApp ?? null,
-        workout.startAt,
-        workout.endAt,
-        workout.localDate,
-        workout.name ?? null,
-        workout.activityType ?? null,
-        workout.sportBucket,
-        workout.elapsedSeconds,
-        workout.movingSeconds ?? null,
-        workout.distanceKm ?? null,
-        workout.activeKcal ?? null,
-        workout.totalKcal ?? null,
-        workout.avgHrBpm ?? null,
-        workout.maxHrBpm ?? null,
-        workout.routeAvailable ? 1 : 0,
-        workout.lapsJson ?? null,
-        workout.streamsJson ?? null,
-        workout.rawJson,
-        importedAt,
-      );
-    }
+          workout.workoutId,
+          workout.platform,
+          workout.sourceApp ?? null,
+          workout.startAt,
+          workout.endAt,
+          workout.localDate,
+          workout.name ?? null,
+          workout.activityType ?? null,
+          workout.sportBucket,
+          workout.elapsedSeconds,
+          workout.movingSeconds ?? null,
+          workout.distanceKm ?? null,
+          workout.activeKcal ?? null,
+          workout.totalKcal ?? null,
+          workout.avgHrBpm ?? null,
+          workout.maxHrBpm ?? null,
+          workout.routeAvailable ? 1 : 0,
+          workout.lapsJson ?? null,
+          workout.streamsJson ?? null,
+          workout.rawJson,
+          importedAt,
+        );
+      }
 
-    for (const sleep of payload.sleepSessions) {
-      await txn.runAsync(
-        `
+      for (const sleep of payload.sleepSessions) {
+        await txn.runAsync(
+          `
           INSERT OR REPLACE INTO sleep_sessions (
             sleep_id, platform, source_app, start_at, end_at, wake_date,
             sleep_seconds, time_in_bed_seconds, deep_sleep_seconds, light_sleep_seconds,
@@ -1792,29 +1908,29 @@ export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
-        sleep.sleepId,
-        sleep.platform,
-        sleep.sourceApp ?? null,
-        sleep.startAt,
-        sleep.endAt,
-        sleep.wakeDate,
-        sleep.sleepSeconds,
-        sleep.timeInBedSeconds,
-        sleep.deepSleepSeconds ?? null,
-        sleep.lightSleepSeconds ?? null,
-        sleep.remSleepSeconds ?? null,
-        sleep.awakeSeconds ?? null,
-        sleep.sleepStageJson ?? null,
-        sleep.sleepEfficiency ?? null,
-        sleep.wakeupCount ?? null,
-        sleep.rawJson,
-        importedAt,
-      );
-    }
+          sleep.sleepId,
+          sleep.platform,
+          sleep.sourceApp ?? null,
+          sleep.startAt,
+          sleep.endAt,
+          sleep.wakeDate,
+          sleep.sleepSeconds,
+          sleep.timeInBedSeconds,
+          sleep.deepSleepSeconds ?? null,
+          sleep.lightSleepSeconds ?? null,
+          sleep.remSleepSeconds ?? null,
+          sleep.awakeSeconds ?? null,
+          sleep.sleepStageJson ?? null,
+          sleep.sleepEfficiency ?? null,
+          sleep.wakeupCount ?? null,
+          sleep.rawJson,
+          importedAt,
+        );
+      }
 
-    for (const nutrition of payload.nutritionDaily) {
-      await txn.runAsync(
-        `
+      for (const nutrition of payload.nutritionDaily) {
+        await txn.runAsync(
+          `
           INSERT OR REPLACE INTO nutrition_daily (
             date, kcal_in, protein_g, carbs_g, fat_g, fiber_g, sugar_g,
             saturated_fat_g, monounsaturated_fat_g, polyunsaturated_fat_g,
@@ -1826,61 +1942,61 @@ export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
-        nutrition.date,
-        nutrition.kcalIn ?? null,
-        nutrition.proteinG ?? null,
-        nutrition.carbsG ?? null,
-        nutrition.fatG ?? null,
-        nutrition.fiberG ?? null,
-        nutrition.sugarG ?? null,
-        nutrition.saturatedFatG ?? null,
-        nutrition.monounsaturatedFatG ?? null,
-        nutrition.polyunsaturatedFatG ?? null,
-        nutrition.transFatG ?? null,
-        nutrition.cholesterolMg ?? null,
-        nutrition.waterMl ?? null,
-        nutrition.caffeineMg ?? null,
-        nutrition.sodiumMg ?? null,
-        nutrition.potassiumMg ?? null,
-        nutrition.calciumMg ?? null,
-        nutrition.ironMg ?? null,
-        nutrition.magnesiumMg ?? null,
-        nutrition.zincMg ?? null,
-        nutrition.vitaminAMcg ?? null,
-        nutrition.vitaminB6Mg ?? null,
-        nutrition.vitaminB12Mcg ?? null,
-        nutrition.vitaminCMg ?? null,
-        nutrition.vitaminDMcg ?? null,
-        nutrition.vitaminEMg ?? null,
-        nutrition.vitaminKMcg ?? null,
-        nutrition.entryCount,
-        nutrition.mealCount ?? null,
-        nutrition.allNutrientsJson,
-        nutrition.sourceModifiedAt ?? null,
-        importedAt,
-      );
-    }
+          nutrition.date,
+          nutrition.kcalIn ?? null,
+          nutrition.proteinG ?? null,
+          nutrition.carbsG ?? null,
+          nutrition.fatG ?? null,
+          nutrition.fiberG ?? null,
+          nutrition.sugarG ?? null,
+          nutrition.saturatedFatG ?? null,
+          nutrition.monounsaturatedFatG ?? null,
+          nutrition.polyunsaturatedFatG ?? null,
+          nutrition.transFatG ?? null,
+          nutrition.cholesterolMg ?? null,
+          nutrition.waterMl ?? null,
+          nutrition.caffeineMg ?? null,
+          nutrition.sodiumMg ?? null,
+          nutrition.potassiumMg ?? null,
+          nutrition.calciumMg ?? null,
+          nutrition.ironMg ?? null,
+          nutrition.magnesiumMg ?? null,
+          nutrition.zincMg ?? null,
+          nutrition.vitaminAMcg ?? null,
+          nutrition.vitaminB6Mg ?? null,
+          nutrition.vitaminB12Mcg ?? null,
+          nutrition.vitaminCMg ?? null,
+          nutrition.vitaminDMcg ?? null,
+          nutrition.vitaminEMg ?? null,
+          nutrition.vitaminKMcg ?? null,
+          nutrition.entryCount,
+          nutrition.mealCount ?? null,
+          nutrition.allNutrientsJson,
+          nutrition.sourceModifiedAt ?? null,
+          importedAt,
+        );
+      }
 
-    for (const diagnostic of payload.diagnostics) {
-      await txn.runAsync(
-        `
+      for (const diagnostic of payload.diagnostics) {
+        await txn.runAsync(
+          `
           INSERT INTO health_connect_diagnostics (
             sync_started_at, record_type, canonical_type, permission, read_kind,
             records_read, samples_written, message
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `,
-        importedAt,
-        diagnostic.recordType,
-        diagnostic.canonicalType,
-        diagnostic.permission,
-        diagnostic.readKind,
-        diagnostic.recordsRead,
-        diagnostic.samplesWritten,
-        diagnostic.message ?? null,
-      );
-    }
-  });
+          importedAt,
+          diagnostic.recordType,
+          diagnostic.canonicalType,
+          diagnostic.permission,
+          diagnostic.readKind,
+          diagnostic.recordsRead,
+          diagnostic.samplesWritten,
+          diagnostic.message ?? null,
+        );
+      }
+    });
 
     await rebuildDailyMetrics();
 
@@ -1915,7 +2031,7 @@ export async function recordSyncRun(
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       provider,
-      details.syncType ?? 'manual',
+      details.syncType ?? "manual",
       startedAt,
       endedAt,
       range.startDate.toISOString(),
@@ -1927,13 +2043,15 @@ export async function recordSyncRun(
       details.nutritionDayCount ?? 0,
       details.warningCount ?? 0,
       details.diagnosticCount ?? 0,
-      error ? 'error' : 'ok',
+      error ? "error" : "ok",
       error ? String(error instanceof Error ? error.message : error) : null,
     );
   });
 }
 
-async function distinctMetricDates(db: SQLite.SQLiteDatabase): Promise<string[]> {
+async function distinctMetricDates(
+  db: SQLite.SQLiteDatabase,
+): Promise<string[]> {
   const rows = await db.getAllAsync<{ date: string }>(`
     SELECT local_date AS date FROM health_samples
     UNION
@@ -1952,7 +2070,7 @@ async function valueFor(
   db: SQLite.SQLiteDatabase,
   date: string,
   canonicalType: CanonicalType,
-  aggregate: 'SUM' | 'AVG' | 'MIN' | 'MAX' = 'SUM',
+  aggregate: "SUM" | "AVG" | "MIN" | "MAX" = "SUM",
 ): Promise<number | undefined> {
   const row = await db.getFirstAsync<{ value: number | null }>(
     `
@@ -2156,23 +2274,23 @@ async function rebuildDailyMetrics(): Promise<void> {
   const generatedAt = new Date().toISOString();
   const today = localDateKey(new Date());
 
-  await db.execAsync('DELETE FROM daily_metrics;');
+  await db.execAsync("DELETE FROM daily_metrics;");
 
   for (const date of dates) {
-    const steps = await singleSourceSumFor(db, date, 'steps');
-    const activeKcal = await valueFor(db, date, 'active_energy');
-    const totalKcal = await valueFor(db, date, 'total_energy');
-    const distanceMeters = await valueFor(db, date, 'distance');
-    const heartRateAvg = await valueFor(db, date, 'heart_rate', 'AVG');
-    const heartRateMin = await valueFor(db, date, 'heart_rate', 'MIN');
-    const heartRateMax = await valueFor(db, date, 'heart_rate', 'MAX');
-    const restingHr = await valueFor(db, date, 'resting_heart_rate', 'AVG');
+    const steps = await singleSourceSumFor(db, date, "steps");
+    const activeKcal = await valueFor(db, date, "active_energy");
+    const totalKcal = await valueFor(db, date, "total_energy");
+    const distanceMeters = await valueFor(db, date, "distance");
+    const heartRateAvg = await valueFor(db, date, "heart_rate", "AVG");
+    const heartRateMin = await valueFor(db, date, "heart_rate", "MIN");
+    const heartRateMax = await valueFor(db, date, "heart_rate", "MAX");
+    const restingHr = await valueFor(db, date, "resting_heart_rate", "AVG");
     const hrv = await selectedHrvFor(db, date);
-    const sleepFallback = await singleSourceSumFor(db, date, 'sleep_session');
-    const weightKg = await latestValueFor(db, date, 'weight');
-    const bodyFatPct = await latestValueFor(db, date, 'body_fat');
-    const leanBodyMassKg = await latestValueFor(db, date, 'lean_body_mass');
-    const vo2max = await latestValueFor(db, date, 'vo2max');
+    const sleepFallback = await singleSourceSumFor(db, date, "sleep_session");
+    const weightKg = await latestValueFor(db, date, "weight");
+    const bodyFatPct = await latestValueFor(db, date, "body_fat");
+    const leanBodyMassKg = await latestValueFor(db, date, "lean_body_mass");
+    const vo2max = await latestValueFor(db, date, "vo2max");
     const sleep = await selectedSleepFor(db, date);
 
     const workoutRows = await db.getAllAsync<WorkoutRow>(
@@ -2397,28 +2515,32 @@ function average(values: (number | undefined)[]): number | undefined {
   return filtered.reduce((sum, value) => sum + value, 0) / filtered.length;
 }
 
-function recommendationFreshnessGaps(sourceFreshness: SourceFreshness[]): SourceFreshness[] {
+function recommendationFreshnessGaps(
+  sourceFreshness: SourceFreshness[],
+): SourceFreshness[] {
   const importantDomains: SourceFreshnessDomain[] = [
-    'sleep',
-    'hrv',
-    'resting_hr',
-    'steps',
-    'energy',
+    "sleep",
+    "hrv",
+    "resting_hr",
+    "steps",
+    "energy",
   ];
 
   return sourceFreshness.filter(
     (item) =>
       importantDomains.includes(item.domain) &&
-      (item.state === 'stale' || item.state === 'missing' || item.state === 'partial'),
+      (item.state === "stale" ||
+        item.state === "missing" ||
+        item.state === "partial"),
   );
 }
 
 function sourceFreshnessPenalty(gaps: SourceFreshness[]): number {
-  if (gaps.some((gap) => gap.state === 'missing')) {
+  if (gaps.some((gap) => gap.state === "missing")) {
     return 10;
   }
 
-  if (gaps.some((gap) => gap.state === 'stale')) {
+  if (gaps.some((gap) => gap.state === "stale")) {
     return 7;
   }
 
@@ -2433,29 +2555,35 @@ function deriveRecommendation(
   if (!current || current.sourceCount === 0) {
     return {
       readiness: null,
-      readinessLabel: 'Connect',
-      color: 'neutral',
-      title: 'Sync Health Connect',
-      detail: 'Import the last 7-30 days to build your baseline.',
+      readinessLabel: "Connect",
+      color: "neutral",
+      title: "Sync Health Connect",
+      detail: "Import the last 7-30 days to build your baseline.",
       reason:
-        'The coach needs sleep, HRV or resting heart rate, steps, energy, and workouts before making a useful training call.',
+        "The coach needs sleep, HRV or resting heart rate, steps, energy, and workouts before making a useful training call.",
       opener:
-        'Connect Health Connect and run a sync. I will turn the on-device data into a daily recovery and training view.',
+        "Connect Health Connect and run a sync. I will turn the on-device data into a daily recovery and training view.",
       strain: 0,
-      strainTarget: '—',
+      strainTarget: "—",
     };
   }
 
-  const baselineRows = history.filter((row) => row.date !== current.date).slice(0, 14);
+  const baselineRows = history
+    .filter((row) => row.date !== current.date)
+    .slice(0, 14);
   const sleepHours = (current.sleepSeconds ?? 0) / 3600;
   const hrvBaseline = hrvBaselineFor(current, history);
   const rhrBaseline = average(baselineRows.map((row) => row.restingHr));
   const sleepBaseline = average(baselineRows.map((row) => row.sleepSeconds));
   const hrvDelta = hrvBaseline.delta;
   const rhrDelta =
-    current.restingHr != null && rhrBaseline ? current.restingHr - rhrBaseline : undefined;
+    current.restingHr != null && rhrBaseline
+      ? current.restingHr - rhrBaseline
+      : undefined;
   const sleepDelta =
-    current.sleepSeconds != null && sleepBaseline ? current.sleepSeconds - sleepBaseline : undefined;
+    current.sleepSeconds != null && sleepBaseline
+      ? current.sleepSeconds - sleepBaseline
+      : undefined;
 
   let readiness = 56;
   const signals: string[] = [];
@@ -2467,27 +2595,43 @@ function deriveRecommendation(
       signals.push(`sleep was ${formatDuration(current.sleepSeconds)}`);
     } else if (sleepHours >= 6.5) {
       readiness += 8;
-      signals.push(`sleep was adequate at ${formatDuration(current.sleepSeconds)}`);
+      signals.push(
+        `sleep was adequate at ${formatDuration(current.sleepSeconds)}`,
+      );
     } else if (sleepHours < 5.75) {
       readiness -= 20;
-      signals.push(`sleep was short at ${formatDuration(current.sleepSeconds)}`);
+      signals.push(
+        `sleep was short at ${formatDuration(current.sleepSeconds)}`,
+      );
     }
   }
 
   if (hrvDelta != null) {
     if (hrvDelta > 8) {
       readiness += 16;
-      signals.push(`${hrvMethodLabel(current.hrvMethod)} HRV is up ${Math.round(hrvDelta)} ms`);
+      signals.push(
+        `${hrvMethodLabel(current.hrvMethod)} HRV is up ${Math.round(hrvDelta)} ms`,
+      );
     } else if (hrvDelta < -8) {
       readiness -= 22;
-      signals.push(`${hrvMethodLabel(current.hrvMethod)} HRV is down ${Math.abs(Math.round(hrvDelta))} ms`);
+      signals.push(
+        `${hrvMethodLabel(current.hrvMethod)} HRV is down ${Math.abs(Math.round(hrvDelta))} ms`,
+      );
     }
-  } else if (current.hrvLastNightAvg != null && hrvBaseline.status === 'method_incompatible') {
+  } else if (
+    current.hrvLastNightAvg != null &&
+    hrvBaseline.status === "method_incompatible"
+  ) {
     signals.push(
       `${hrvMethodLabel(current.hrvMethod)} HRV is available, but incompatible HRV history was ignored`,
     );
-  } else if (current.hrvLastNightAvg != null && hrvBaseline.status === 'insufficient_baseline') {
-    signals.push(`${hrvMethodLabel(current.hrvMethod)} HRV needs more matching history`);
+  } else if (
+    current.hrvLastNightAvg != null &&
+    hrvBaseline.status === "insufficient_baseline"
+  ) {
+    signals.push(
+      `${hrvMethodLabel(current.hrvMethod)} HRV needs more matching history`,
+    );
   }
 
   if (rhrDelta != null) {
@@ -2502,60 +2646,64 @@ function deriveRecommendation(
 
   if ((current.activityElapsedSeconds ?? 0) > 5400) {
     readiness -= 8;
-    signals.push('you already logged a long session today');
+    signals.push("you already logged a long session today");
   }
 
   if (freshnessGaps.length) {
     const primaryGaps = freshnessGaps.slice(0, 2);
-    const labels = primaryGaps.map((gap) => `${gap.label.toLowerCase()} is ${gap.state}`);
+    const labels = primaryGaps.map(
+      (gap) => `${gap.label.toLowerCase()} is ${gap.state}`,
+    );
     readiness -= sourceFreshnessPenalty(freshnessGaps);
-    signals.push(`${labels.join(' and ')}, so this call is conservative`);
+    signals.push(`${labels.join(" and ")}, so this call is conservative`);
   }
 
   readiness = Math.max(20, Math.min(96, Math.round(readiness)));
 
   if (!signals.length) {
-    signals.push('Health Connect has partial data, so this is a conservative call');
+    signals.push(
+      "Health Connect has partial data, so this is a conservative call",
+    );
   }
 
   if (readiness < 50) {
     return {
       readiness,
-      readinessLabel: 'Recover',
-      color: 'warm',
-      title: 'Easy walk + mobility',
-      detail: '30 min Z1 walk · 10 min hips and calves',
-      reason: `${signals.join(', ')}. Pushing hard today would reduce the odds of stacking the next session well.`,
-      opener: `Honest check-in: ${signals.join(', ')}. I would keep this soft and earn tomorrow.`,
+      readinessLabel: "Recover",
+      color: "warm",
+      title: "Easy walk + mobility",
+      detail: "30 min Z1 walk · 10 min hips and calves",
+      reason: `${signals.join(", ")}. Pushing hard today would reduce the odds of stacking the next session well.`,
+      opener: `Honest check-in: ${signals.join(", ")}. I would keep this soft and earn tomorrow.`,
       strain: 5.5,
-      strainTarget: '4-7',
+      strainTarget: "4-7",
     };
   }
 
   if (readiness >= 78 && (current.workoutCount ?? 0) === 0) {
     return {
       readiness,
-      readinessLabel: 'Primed',
-      color: 'positive',
-      title: 'Quality run',
-      detail: '10 min easy · 4 x 5 min strong · cool down',
-      reason: `${signals.join(', ')}. Current recovery supports a harder aerobic stimulus.`,
-      opener: `You're primed. ${signals.join(', ')}. If you were waiting for a green light, this is it.`,
+      readinessLabel: "Primed",
+      color: "positive",
+      title: "Quality run",
+      detail: "10 min easy · 4 x 5 min strong · cool down",
+      reason: `${signals.join(", ")}. Current recovery supports a harder aerobic stimulus.`,
+      opener: `You're primed. ${signals.join(", ")}. If you were waiting for a green light, this is it.`,
       strain: 13.5,
-      strainTarget: '12-15',
+      strainTarget: "12-15",
     };
   }
 
   return {
     readiness,
-    readinessLabel: 'Ready',
-    color: 'cool',
-    title: 'Aerobic base',
-    detail: '45 min easy run or ride · stay conversational',
-    reason: `${signals.join(', ')}. This is a good day to add durable aerobic volume without forcing intensity.`,
-    opener: `Solid baseline today. ${signals.join(', ')}. Stack the work and keep it controlled.`,
+    readinessLabel: "Ready",
+    color: "cool",
+    title: "Aerobic base",
+    detail: "45 min easy run or ride · stay conversational",
+    reason: `${signals.join(", ")}. This is a good day to add durable aerobic volume without forcing intensity.`,
+    opener: `Solid baseline today. ${signals.join(", ")}. Stack the work and keep it controlled.`,
     strain: 9.5,
-    strainTarget: '8-11',
+    strainTarget: "8-11",
   };
 }
 
@@ -2565,17 +2713,19 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
     await rebuildDailyMetrics();
 
     const countRow = await db.getFirstAsync<{ total: number }>(
-      'SELECT COUNT(*) AS total FROM health_samples',
+      "SELECT COUNT(*) AS total FROM health_samples",
     );
-    const workoutRows = await db.getAllAsync<WorkoutRow>('SELECT * FROM workouts ORDER BY start_at ASC');
+    const workoutRows = await db.getAllAsync<WorkoutRow>(
+      "SELECT * FROM workouts ORDER BY start_at ASC",
+    );
     const sleepCountRow = await db.getFirstAsync<{ total: number }>(
-      'SELECT COUNT(*) AS total FROM daily_metrics WHERE has_sleep = 1',
+      "SELECT COUNT(*) AS total FROM daily_metrics WHERE has_sleep = 1",
     );
     const nutritionCountRow = await db.getFirstAsync<{ total: number }>(
-      'SELECT COUNT(*) AS total FROM nutrition_daily',
+      "SELECT COUNT(*) AS total FROM nutrition_daily",
     );
     const coverageRow = await db.getFirstAsync<{ total: number }>(
-      'SELECT COUNT(*) AS total FROM daily_metrics WHERE source_count > 0',
+      "SELECT COUNT(*) AS total FROM daily_metrics WHERE source_count > 0",
     );
     const availabilityRows = await db.getAllAsync<MetricAvailabilityRow>(`
       SELECT
@@ -2606,7 +2756,8 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
     `);
     const history = rows.map(toDailyMetrics);
     const todayKey = localDateKey(new Date());
-    const today = history.find((row) => row.date === todayKey) ?? history[0] ?? null;
+    const today =
+      history.find((row) => row.date === todayKey) ?? history[0] ?? null;
     const recentWorkouts = await getRecentWorkoutsFromDb(db, 5);
     const recentSamples = await getRecentSamplesFromDb(db, 12);
 
@@ -2677,7 +2828,7 @@ export async function getLastSyncRun(): Promise<SyncRunRow | null> {
   return withStorageLock(async () => {
     const db = await getDb();
     return db.getFirstAsync<SyncRunRow>(
-      'SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1',
+      "SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1",
     );
   });
 }
@@ -2695,7 +2846,7 @@ export async function getRecentSyncRuns(limit = 6): Promise<SyncRunRow[]> {
   return withStorageLock(async () => {
     const db = await getDb();
     return db.getAllAsync<SyncRunRow>(
-      'SELECT * FROM sync_runs ORDER BY ended_at DESC, id DESC LIMIT ?',
+      "SELECT * FROM sync_runs ORDER BY ended_at DESC, id DESC LIMIT ?",
       limit,
     );
   });
@@ -2734,10 +2885,10 @@ export async function getCoachHealthContext({
       WHERE source_count > 0
     `);
     const syncRunSummary = await db.getFirstAsync<{ total: number }>(
-      'SELECT COUNT(*) AS total FROM sync_runs',
+      "SELECT COUNT(*) AS total FROM sync_runs",
     );
     const latestSync = await db.getFirstAsync<SyncRunRow>(
-      'SELECT * FROM sync_runs ORDER BY ended_at DESC LIMIT 1',
+      "SELECT * FROM sync_runs ORDER BY ended_at DESC LIMIT 1",
     );
     const availabilityRows = await db.getAllAsync<MetricAvailabilityRow>(`
       SELECT
@@ -2777,7 +2928,7 @@ export async function getCoachHealthContext({
       LIMIT 14
     `);
     const workoutRows = await db.getAllAsync<WorkoutRow>(
-      'SELECT * FROM workouts ORDER BY start_at DESC',
+      "SELECT * FROM workouts ORDER BY start_at DESC",
     );
     const sourceFreshness = await getSourceFreshness(db);
 
@@ -2788,10 +2939,10 @@ export async function getCoachHealthContext({
     const dailyMetricCount = Number(dailyMetrics?.total ?? 0);
     const hasSyncedHealthData = Boolean(
       healthSampleCount ||
-        sleepSessionCount ||
-        workoutCount ||
-        nutritionDayCount ||
-        dailyMetricCount,
+      sleepSessionCount ||
+      workoutCount ||
+      nutritionDayCount ||
+      dailyMetricCount,
     );
     const metricAvailability = buildMetricAvailability(
       availabilityRows,
@@ -2805,11 +2956,27 @@ export async function getCoachHealthContext({
       generatedAt: new Date().toISOString(),
       hasSyncedHealthData,
       sqliteTables: {
-        healthSamples: healthSamples ?? { total: 0, first_date: null, latest_date: null },
-        sleepSessions: sleepSessions ?? { total: 0, first_date: null, latest_date: null },
+        healthSamples: healthSamples ?? {
+          total: 0,
+          first_date: null,
+          latest_date: null,
+        },
+        sleepSessions: sleepSessions ?? {
+          total: 0,
+          first_date: null,
+          latest_date: null,
+        },
         workouts: workouts ?? { total: 0, first_date: null, latest_date: null },
-        nutritionDaily: nutritionDaily ?? { total: 0, first_date: null, latest_date: null },
-        dailyMetrics: dailyMetrics ?? { total: 0, first_date: null, latest_date: null },
+        nutritionDaily: nutritionDaily ?? {
+          total: 0,
+          first_date: null,
+          latest_date: null,
+        },
+        dailyMetrics: dailyMetrics ?? {
+          total: 0,
+          first_date: null,
+          latest_date: null,
+        },
         syncRuns: {
           total: Number(syncRunSummary?.total ?? 0),
           latestEndedAt: latestSync?.ended_at ?? null,
@@ -2844,8 +3011,8 @@ export async function getCoachHealthContext({
         sourceApp: workout.source_app ?? undefined,
       })),
       coachDataInstruction: hasSyncedHealthData
-        ? 'SQLite contains synced health data. Do not tell the user there is no synced health data. If a specific metric is missing, name that exact missing metric instead.'
-        : 'SQLite has no synced health rows yet. Ask the user to sync a health source before making data-dependent claims.',
+        ? "SQLite contains synced health data. Do not tell the user there is no synced health data. If a specific metric is missing, name that exact missing metric instead."
+        : "SQLite has no synced health rows yet. Ask the user to sync a health source before making data-dependent claims.",
     };
   });
 }
@@ -2881,11 +3048,15 @@ async function getRecentWorkoutsFromDb(
 }
 
 export async function getRecentSamples(limit = 12): Promise<HealthSampleRow[]> {
-  return withStorageLock(async () => getRecentSamplesFromDb(await getDb(), limit));
+  return withStorageLock(async () =>
+    getRecentSamplesFromDb(await getDb(), limit),
+  );
 }
 
 export async function getRecentWorkouts(limit = 5): Promise<WorkoutRow[]> {
-  return withStorageLock(async () => getRecentWorkoutsFromDb(await getDb(), limit));
+  return withStorageLock(async () =>
+    getRecentWorkoutsFromDb(await getDb(), limit),
+  );
 }
 
 export async function clearPipeline(): Promise<void> {
@@ -2907,32 +3078,40 @@ export async function exportPipelineJson(): Promise<string> {
   return withStorageLock(async () => {
     const db = await getDb();
     const samples = await db.getAllAsync<HealthSampleRow>(
-      'SELECT * FROM health_samples ORDER BY start_at ASC',
+      "SELECT * FROM health_samples ORDER BY start_at ASC",
     );
     const sleepSessions = await db.getAllAsync<SleepSessionRow>(
-      'SELECT * FROM sleep_sessions ORDER BY start_at ASC',
+      "SELECT * FROM sleep_sessions ORDER BY start_at ASC",
     );
     const workouts = await db.getAllAsync<WorkoutRow>(
-      'SELECT * FROM workouts ORDER BY start_at ASC',
+      "SELECT * FROM workouts ORDER BY start_at ASC",
     );
-    const nutritionDaily = await db.getAllAsync('SELECT * FROM nutrition_daily ORDER BY date ASC');
+    const nutritionDaily = await db.getAllAsync(
+      "SELECT * FROM nutrition_daily ORDER BY date ASC",
+    );
     const dailyMetrics = await db.getAllAsync<DailyMetricsRow>(
-      'SELECT * FROM daily_metrics ORDER BY date ASC',
+      "SELECT * FROM daily_metrics ORDER BY date ASC",
     );
     const syncRuns = await db.getAllAsync<SyncRunRow>(
-      'SELECT * FROM sync_runs ORDER BY started_at ASC',
+      "SELECT * FROM sync_runs ORDER BY started_at ASC",
     );
     const diagnostics = await db.getAllAsync(
-      'SELECT * FROM health_connect_diagnostics ORDER BY sync_started_at ASC',
+      "SELECT * FROM health_connect_diagnostics ORDER BY sync_started_at ASC",
     );
     const sourceFreshness = await getSourceFreshness(db);
     const goalProfileRow = await db.getFirstAsync<GoalProfileRow>(
       "SELECT * FROM goal_profile WHERE id = 'current' LIMIT 1",
     );
+    const exportedAt = new Date().toISOString();
+    const goalProfile = goalProfileRow ? toGoalProfile(goalProfileRow) : null;
+    const riskFlags = extractRiskFlagsFromCoachRequest({
+      generated_at: exportedAt,
+      goal_profile: goalProfile ?? undefined,
+    });
 
     const payload = {
-      schema: 'biostream_training_pipeline.v4',
-      exportedAt: new Date().toISOString(),
+      schema: "biostream_training_pipeline.v5",
+      exportedAt,
       samples,
       sleepSessions,
       workouts,
@@ -2941,12 +3120,15 @@ export async function exportPipelineJson(): Promise<string> {
       sourceFreshness,
       syncRuns,
       diagnostics,
-      goalProfile: goalProfileRow ? toGoalProfile(goalProfileRow) : null,
+      goalProfile,
+      riskFlags,
     };
 
     const directory = FileSystem.documentDirectory;
     if (!directory) {
-      throw new Error('No writable document directory is available on this device.');
+      throw new Error(
+        "No writable document directory is available on this device.",
+      );
     }
 
     const fileUri = `${directory}biostream-pipeline-${Date.now()}.json`;
@@ -2956,8 +3138,8 @@ export async function exportPipelineJson(): Promise<string> {
 
     if (await Sharing.isAvailableAsync()) {
       await Sharing.shareAsync(fileUri, {
-        mimeType: 'application/json',
-        dialogTitle: 'Export BioStream pipeline JSON',
+        mimeType: "application/json",
+        dialogTitle: "Export BioStream pipeline JSON",
       });
     }
 
