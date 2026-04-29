@@ -182,6 +182,7 @@ or severe fatigue force safer guidance.
 **Scope:**
 
 - Create a risk flag model and helper functions.
+- Extend the `risk_flags` schema introduced by issue 25 with the actual flag catalog and extraction helpers.
 - Collect risk flags from onboarding, daily check-ins, and typed adjustments.
 - Add a conservative override layer before recommendations are shown.
 - Surface professional-care guidance for serious symptoms without diagnosing.
@@ -709,3 +710,44 @@ or severe fatigue force safer guidance.
 
 - Building a full training stress model.
 - Connecting to Intervals.icu.
+
+### 27. Demo Mode With Bundled Adam Dataset
+
+**Area:** demo, data-pipeline, mobile-ui, privacy
+
+**Goal:** Add a demo mode that uses Adam's approved local demo dataset instead of reading personal health
+data from the phone.
+
+**Scope:**
+
+- Add a demo mode setting or launch flag that can be enabled before a live demo.
+- Bundle Adam's approved demo data as a local SQLite seed, JSON fixture, or other app-local file.
+- Route pipeline snapshot, coach recommendations, source coverage, diagnostics, history, and exports to
+  the demo dataset while demo mode is enabled.
+- Clearly label demo data in the UI and exported artifacts so it cannot be mistaken for the current
+  device owner's health data.
+- Keep demo data isolated from real imported phone data, including clear reset behavior when switching
+  demo mode off.
+- Allow the app to run the demo path without health permissions, Health Connect, HealthKit, or real
+  device health records.
+
+**Acceptance Criteria:**
+
+- Demo mode can be enabled on a fresh install and produces a populated coach, source, and history
+  experience without syncing phone health data.
+- When demo mode is on, the app does not request or read the current phone owner's health data for coach
+  context.
+- All recommendation inputs and exports identify Adam's dataset as demo data with source metadata and
+  date ranges.
+- Turning demo mode off returns the app to the normal local pipeline and does not merge demo records into
+  personal health storage.
+- Missing, stale, and risky inputs in the demo dataset still flow through the same conservative coach
+  logic as real data.
+- The implementation includes a deterministic fixture or seed path that can be verified without native
+  health permissions.
+
+**Out of Scope:**
+
+- Cloud-hosted demo data.
+- Editing Adam's dataset in the app.
+- Treating demo data as anonymized unless the dataset has been reviewed and approved separately.

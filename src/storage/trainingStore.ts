@@ -2,10 +2,22 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as SQLite from 'expo-sqlite';
 
+import {
+  normalizeGoalProfile,
+  type CoachingStyle,
+  type ExperienceLevel,
+  type GoalProfile,
+  type GoalProfileDraft,
+  type PrimaryGoal,
+  type StartingStrategy,
+} from '../goals/goalProfile';
 import { formatDuration, localDateKey } from '../lib/dates';
 import { safeJsonStringify } from '../lib/json';
 import {
   buildDailyMetricsRollup,
+  hrvBaselineFor,
+  hrvMethodForCanonicalType,
+  hrvMethodLabel,
   normalizeLegacyHealthSampleRow,
   type LegacyHealthSampleRow,
 } from './trainingStoreRules';
@@ -16,6 +28,8 @@ import type {
   HealthConnectReadDiagnostic,
   HealthProvider,
   HealthSample,
+  HrvCanonicalType,
+  HrvMethod,
   MetricAvailability,
   NutritionDailyRecord,
   PipelineSnapshot,
@@ -41,6 +55,7 @@ export type HealthSampleRow = {
   timezone: string | null;
   value: number | null;
   unit: string | null;
+  hrv_method: HrvMethod | null;
   metadata_json: string;
   source_modified_at: string | null;
   imported_at: string;
@@ -162,6 +177,7 @@ type LatestSampleByTypeRow = {
   start_at: string;
   value: number | null;
   unit: string | null;
+  hrv_method: HrvMethod | null;
 };
 
 type SourceValueRow = {
@@ -170,6 +186,26 @@ type SourceValueRow = {
   sample_count: number;
   latest_end_at: string | null;
   source_is_combined: number;
+};
+
+type HrvRollupRow = {
+  source_key: string;
+  source_app: string | null;
+  canonical_type: HrvCanonicalType;
+  hrv_method: HrvMethod;
+  value: number | null;
+  sample_count: number;
+  source_days: number | null;
+  latest_end_at: string | null;
+};
+
+type HrvMethodStatsRow = {
+  canonical_type: HrvCanonicalType;
+  hrv_method: HrvMethod | null;
+  source_key: string;
+  source_app: string | null;
+  sample_count: number;
+  day_count: number;
 };
 
 type SleepRollupRow = {
@@ -205,6 +241,11 @@ type DailyMetricsRow = {
   heart_rate_min_bpm: number | null;
   heart_rate_max_bpm: number | null;
   hrv_last_night_avg: number | null;
+  hrv_method: HrvMethod | null;
+  hrv_canonical_type: HrvCanonicalType | null;
+  hrv_source_app: string | null;
+  hrv_source_key: string | null;
+  hrv_sample_count: number | null;
   workout_count: number | null;
   run_workout_count: number | null;
   ride_workout_count: number | null;
@@ -215,14 +256,91 @@ type DailyMetricsRow = {
   protein_g: number | null;
   carbs_g: number | null;
   fat_g: number | null;
+  saturated_fat_g: number | null;
+  monounsaturated_fat_g: number | null;
+  polyunsaturated_fat_g: number | null;
+  trans_fat_g: number | null;
   fiber_g: number | null;
   sugar_g: number | null;
+  cholesterol_mg: number | null;
+  caffeine_mg: number | null;
+  sodium_mg: number | null;
+  potassium_mg: number | null;
+  calcium_mg: number | null;
+  iron_mg: number | null;
+  magnesium_mg: number | null;
+  zinc_mg: number | null;
+  vitamin_a_mcg: number | null;
+  vitamin_b6_mg: number | null;
+  vitamin_b12_mcg: number | null;
+  vitamin_c_mg: number | null;
+  vitamin_d_mcg: number | null;
+  vitamin_e_mg: number | null;
+  vitamin_k_mcg: number | null;
   water_ml: number | null;
   weight_kg: number | null;
   body_fat_pct: number | null;
   lean_body_mass_kg: number | null;
   vo2max: number | null;
   generated_at: string;
+};
+
+const nutritionDailyAddedColumns: Record<string, string> = {
+  saturated_fat_g: 'REAL',
+  monounsaturated_fat_g: 'REAL',
+  polyunsaturated_fat_g: 'REAL',
+  trans_fat_g: 'REAL',
+  potassium_mg: 'REAL',
+  calcium_mg: 'REAL',
+  iron_mg: 'REAL',
+  magnesium_mg: 'REAL',
+  zinc_mg: 'REAL',
+  vitamin_a_mcg: 'REAL',
+  vitamin_b6_mg: 'REAL',
+  vitamin_b12_mcg: 'REAL',
+  vitamin_c_mg: 'REAL',
+  vitamin_d_mcg: 'REAL',
+  vitamin_e_mg: 'REAL',
+  vitamin_k_mcg: 'REAL',
+};
+
+const dailyMetricsAddedNutritionColumns: Record<string, string> = {
+  saturated_fat_g: 'REAL',
+  monounsaturated_fat_g: 'REAL',
+  polyunsaturated_fat_g: 'REAL',
+  trans_fat_g: 'REAL',
+  cholesterol_mg: 'REAL',
+  caffeine_mg: 'REAL',
+  sodium_mg: 'REAL',
+  potassium_mg: 'REAL',
+  calcium_mg: 'REAL',
+  iron_mg: 'REAL',
+  magnesium_mg: 'REAL',
+  zinc_mg: 'REAL',
+  vitamin_a_mcg: 'REAL',
+  vitamin_b6_mg: 'REAL',
+  vitamin_b12_mcg: 'REAL',
+  vitamin_c_mg: 'REAL',
+  vitamin_d_mcg: 'REAL',
+  vitamin_e_mg: 'REAL',
+  vitamin_k_mcg: 'REAL',
+};
+
+type GoalProfileRow = {
+  id: 'current';
+  primary_goal: PrimaryGoal;
+  secondary_goals_json: string;
+  motivation: string | null;
+  timeframe: string | null;
+  experience_level: ExperienceLevel;
+  preferred_activities_json: string;
+  disliked_activities_json: string;
+  constraints_json: string;
+  risk_flags_json: string;
+  coaching_style: CoachingStyle;
+  starting_strategy: StartingStrategy;
+  confidence: number;
+  updated_at: string;
 };
 
 export type CoachHealthContext = {
@@ -253,6 +371,7 @@ export type CoachHealthContext = {
     startAt: string;
     value?: number;
     unit?: string;
+    hrvMethod?: HrvMethod;
   }[];
   recentDailyMetrics: DailyMetrics[];
   recentWorkouts: {
@@ -344,12 +463,20 @@ const sourceFreshnessConfigs: SourceFreshnessConfig[] = [
   {
     domain: 'nutrition',
     label: 'Nutrition',
-    canonicalTypes: ['nutrition', 'hydration'],
+    canonicalTypes: ['nutrition'],
     maxFreshAgeDays: 1,
     source: 'nutrition',
     todayIsPartial: true,
-    partialWhenMissingTypes: true,
-    missingLimitation: 'No imported nutrition or hydration rows are available.',
+    missingLimitation: 'No imported nutrition rows are available.',
+  },
+  {
+    domain: 'hydration',
+    label: 'Hydration',
+    canonicalTypes: ['hydration'],
+    maxFreshAgeDays: 1,
+    source: 'nutrition',
+    todayIsPartial: true,
+    missingLimitation: 'No imported hydration rows are available.',
   },
   {
     domain: 'body_composition',
@@ -378,6 +505,21 @@ function bool(value: number | null | undefined): boolean {
 
 function optionalNumber(value: number | null | undefined): number | undefined {
   return value == null ? undefined : Number(value);
+}
+
+function parseJsonStringArray(value: string | null | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string')
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function numberOrZero(value: number | null | undefined): number {
@@ -674,7 +816,31 @@ async function freshnessStatsForWorkouts(
 
 async function freshnessStatsForNutrition(
   db: SQLite.SQLiteDatabase,
+  canonicalTypes: CanonicalType[],
 ): Promise<FreshnessStatsRow | null> {
+  const includesNutrition = canonicalTypes.includes('nutrition');
+  const includesHydration = canonicalTypes.includes('hydration');
+  const nutritionDailyFilters: string[] = [];
+  if (includesNutrition) {
+    nutritionDailyFilters.push(`(
+      kcal_in IS NOT NULL OR protein_g IS NOT NULL OR carbs_g IS NOT NULL OR fat_g IS NOT NULL OR
+      saturated_fat_g IS NOT NULL OR monounsaturated_fat_g IS NOT NULL OR
+      polyunsaturated_fat_g IS NOT NULL OR trans_fat_g IS NOT NULL OR fiber_g IS NOT NULL OR
+      sugar_g IS NOT NULL OR cholesterol_mg IS NOT NULL OR caffeine_mg IS NOT NULL OR
+      sodium_mg IS NOT NULL OR potassium_mg IS NOT NULL OR calcium_mg IS NOT NULL OR
+      iron_mg IS NOT NULL OR magnesium_mg IS NOT NULL OR zinc_mg IS NOT NULL OR
+      vitamin_a_mcg IS NOT NULL OR vitamin_b6_mg IS NOT NULL OR vitamin_b12_mcg IS NOT NULL OR
+      vitamin_c_mg IS NOT NULL OR vitamin_d_mcg IS NOT NULL OR vitamin_e_mg IS NOT NULL OR
+      vitamin_k_mcg IS NOT NULL
+    )`);
+  }
+  if (includesHydration) {
+    nutritionDailyFilters.push('water_ml IS NOT NULL');
+  }
+  const nutritionDailyWhere = nutritionDailyFilters.length
+    ? `WHERE ${nutritionDailyFilters.join(' OR ')}`
+    : '';
+
   return db.getFirstAsync<FreshnessStatsRow>(`
     SELECT
       COUNT(*) AS sample_count,
@@ -684,12 +850,13 @@ async function freshnessStatsForNutrition(
     FROM (
       SELECT date AS row_id, date AS date_key, COALESCE(source_modified_at, imported_at) AS updated_at
       FROM nutrition_daily
+      ${nutritionDailyWhere}
       UNION ALL
       SELECT sample_id AS row_id, local_date AS date_key, COALESCE(source_modified_at, end_at, imported_at) AS updated_at
       FROM health_samples
-      WHERE canonical_type IN ('nutrition', 'hydration')
+      WHERE canonical_type IN (${placeholders(canonicalTypes)})
     )
-  `);
+  `, ...canonicalTypes);
 }
 
 async function freshnessStatsFor(
@@ -705,7 +872,7 @@ async function freshnessStatsFor(
   }
 
   if (config.source === 'nutrition') {
-    return freshnessStatsForNutrition(db);
+    return freshnessStatsForNutrition(db, config.canonicalTypes);
   }
 
   if (config.source === 'check_ins') {
@@ -734,6 +901,68 @@ async function presentCanonicalTypesFor(
   );
 
   return new Set(rows.filter((row) => Number(row.sample_count) > 0).map((row) => row.canonical_type));
+}
+
+async function hrvMethodStatsFor(db: SQLite.SQLiteDatabase): Promise<HrvMethodStatsRow[]> {
+  return db.getAllAsync<HrvMethodStatsRow>(`
+    WITH hrv_samples AS (
+      SELECT
+        canonical_type,
+        COALESCE(
+          hrv_method,
+          CASE canonical_type
+            WHEN 'hrv_rmssd' THEN 'rmssd'
+            WHEN 'hrv_sdnn' THEN 'sdnn'
+          END
+        ) AS hrv_method,
+        COALESCE(NULLIF(source_app, ''), NULLIF(source_device, ''), platform || ':' || record_type)
+          AS source_key,
+        source_app,
+        local_date,
+        value
+      FROM health_samples
+      WHERE canonical_type IN ('hrv_rmssd', 'hrv_sdnn')
+        AND value IS NOT NULL
+    )
+    SELECT
+      canonical_type,
+      hrv_method,
+      source_key,
+      MAX(source_app) AS source_app,
+      COUNT(*) AS sample_count,
+      COUNT(DISTINCT local_date) AS day_count
+    FROM hrv_samples
+    GROUP BY canonical_type, hrv_method, source_key
+    ORDER BY day_count DESC, sample_count DESC, source_key ASC
+  `);
+}
+
+function hrvMethodLimitations(stats: HrvMethodStatsRow[]): string[] {
+  if (!stats.length) {
+    return [];
+  }
+
+  const methods = Array.from(
+    new Set(
+      stats
+        .map((row) => row.hrv_method ?? hrvMethodForCanonicalType(row.canonical_type))
+        .filter((method): method is HrvMethod => Boolean(method)),
+    ),
+  );
+  const limitations: string[] = [];
+
+  if (methods.length > 1 || stats.length > 1) {
+    const methodList = methods.map(hrvMethodLabel).join(' and ');
+    limitations.push(
+      `Imported HRV has ${methodList}; readiness compares only matching source and method.`,
+    );
+  }
+
+  if (stats.some((row) => !row.hrv_method)) {
+    limitations.push('Some HRV rows were imported before method metadata was explicit.');
+  }
+
+  return limitations;
 }
 
 function buildFreshnessLimitations({
@@ -843,13 +1072,21 @@ async function getSourceFreshness(db: SQLite.SQLiteDatabase): Promise<SourceFres
       today,
       latestDate,
     });
+    if (config.domain === 'hrv') {
+      limitations.push(...hrvMethodLimitations(await hrvMethodStatsFor(db)));
+    }
 
     let state: SourceFreshness['state'] = 'fresh';
     if (!sampleCount) {
       state = 'missing';
     } else if (ageDays != null && ageDays > config.maxFreshAgeDays) {
       state = 'stale';
-    } else if (missingTypes.length || (config.todayIsPartial && latestDate === today)) {
+    } else if (
+      missingTypes.length ||
+      (config.todayIsPartial && latestDate === today) ||
+      (config.domain === 'hrv' &&
+        limitations.some((limitation) => limitation.startsWith('Imported HRV has ')))
+    ) {
       state = 'partial';
     }
 
@@ -863,7 +1100,7 @@ async function getSourceFreshness(db: SQLite.SQLiteDatabase): Promise<SourceFres
       latestLocalDate: latestDate,
       lastUpdatedAt: stats?.last_updated_at ?? undefined,
       ageDays,
-      limitations,
+      limitations: Array.from(new Set(limitations)),
     });
   }
 
@@ -894,6 +1131,11 @@ function toDailyMetrics(row: DailyMetricsRow): DailyMetrics {
     heartRateMinBpm: optionalNumber(row.heart_rate_min_bpm),
     heartRateMaxBpm: optionalNumber(row.heart_rate_max_bpm),
     hrvLastNightAvg: optionalNumber(row.hrv_last_night_avg),
+    hrvMethod: row.hrv_method ?? undefined,
+    hrvCanonicalType: row.hrv_canonical_type ?? undefined,
+    hrvSourceApp: row.hrv_source_app ?? undefined,
+    hrvSourceKey: row.hrv_source_key ?? undefined,
+    hrvSampleCount: optionalNumber(row.hrv_sample_count),
     workoutCount: optionalNumber(row.workout_count),
     runWorkoutCount: optionalNumber(row.run_workout_count),
     rideWorkoutCount: optionalNumber(row.ride_workout_count),
@@ -904,8 +1146,27 @@ function toDailyMetrics(row: DailyMetricsRow): DailyMetrics {
     proteinG: optionalNumber(row.protein_g),
     carbsG: optionalNumber(row.carbs_g),
     fatG: optionalNumber(row.fat_g),
+    saturatedFatG: optionalNumber(row.saturated_fat_g),
+    monounsaturatedFatG: optionalNumber(row.monounsaturated_fat_g),
+    polyunsaturatedFatG: optionalNumber(row.polyunsaturated_fat_g),
+    transFatG: optionalNumber(row.trans_fat_g),
     fiberG: optionalNumber(row.fiber_g),
     sugarG: optionalNumber(row.sugar_g),
+    cholesterolMg: optionalNumber(row.cholesterol_mg),
+    caffeineMg: optionalNumber(row.caffeine_mg),
+    sodiumMg: optionalNumber(row.sodium_mg),
+    potassiumMg: optionalNumber(row.potassium_mg),
+    calciumMg: optionalNumber(row.calcium_mg),
+    ironMg: optionalNumber(row.iron_mg),
+    magnesiumMg: optionalNumber(row.magnesium_mg),
+    zincMg: optionalNumber(row.zinc_mg),
+    vitaminAMcg: optionalNumber(row.vitamin_a_mcg),
+    vitaminB6Mg: optionalNumber(row.vitamin_b6_mg),
+    vitaminB12Mcg: optionalNumber(row.vitamin_b12_mcg),
+    vitaminCMg: optionalNumber(row.vitamin_c_mg),
+    vitaminDMcg: optionalNumber(row.vitamin_d_mcg),
+    vitaminEMg: optionalNumber(row.vitamin_e_mg),
+    vitaminKMcg: optionalNumber(row.vitamin_k_mcg),
     waterMl: optionalNumber(row.water_ml),
     weightKg: optionalNumber(row.weight_kg),
     bodyFatPct: optionalNumber(row.body_fat_pct),
@@ -913,6 +1174,26 @@ function toDailyMetrics(row: DailyMetricsRow): DailyMetrics {
     vo2max: optionalNumber(row.vo2max),
     generatedAt: row.generated_at,
   };
+}
+
+function toGoalProfile(row: GoalProfileRow): GoalProfile {
+  return normalizeGoalProfile(
+    {
+      primaryGoal: row.primary_goal,
+      secondaryGoals: parseJsonStringArray(row.secondary_goals_json) as PrimaryGoal[],
+      motivation: row.motivation,
+      timeframe: row.timeframe,
+      experienceLevel: row.experience_level,
+      preferredActivities: parseJsonStringArray(row.preferred_activities_json),
+      dislikedActivities: parseJsonStringArray(row.disliked_activities_json),
+      constraints: parseJsonStringArray(row.constraints_json),
+      riskFlags: parseJsonStringArray(row.risk_flags_json),
+      coachingStyle: row.coaching_style,
+      startingStrategy: row.starting_strategy,
+      confidence: row.confidence,
+    },
+    row.updated_at,
+  );
 }
 
 async function getDb(): Promise<SQLite.SQLiteDatabase> {
@@ -928,6 +1209,23 @@ async function getDb(): Promise<SQLite.SQLiteDatabase> {
   return dbPromise;
 }
 
+async function addMissingColumns(
+  db: SQLite.SQLiteDatabase,
+  tableName: string,
+  columns: Record<string, string>,
+): Promise<void> {
+  const existingColumns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${tableName})`);
+  const existingNames = new Set(existingColumns.map((column) => column.name));
+
+  for (const [columnName, columnType] of Object.entries(columns)) {
+    if (existingNames.has(columnName)) {
+      continue;
+    }
+
+    await db.execAsync(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnType};`);
+  }
+}
+
 async function migrateLegacyHealthSamples(db: SQLite.SQLiteDatabase): Promise<void> {
   const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(health_samples)');
   if (!columns.length || columns.some((column) => column.name === 'sample_id')) {
@@ -936,6 +1234,43 @@ async function migrateLegacyHealthSamples(db: SQLite.SQLiteDatabase): Promise<vo
 
   await db.execAsync(`
     ALTER TABLE health_samples RENAME TO health_samples_legacy;
+  `);
+}
+
+async function ensureColumn(
+  db: SQLite.SQLiteDatabase,
+  table: string,
+  column: string,
+  definition: string,
+): Promise<void> {
+  const columns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+  if (columns.some((item) => item.name === column)) {
+    return;
+  }
+
+  await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${definition};`);
+}
+
+async function ensureHrvSchema(db: SQLite.SQLiteDatabase): Promise<void> {
+  await ensureColumn(db, 'health_samples', 'hrv_method', 'hrv_method TEXT');
+  await ensureColumn(db, 'daily_metrics', 'hrv_method', 'hrv_method TEXT');
+  await ensureColumn(db, 'daily_metrics', 'hrv_canonical_type', 'hrv_canonical_type TEXT');
+  await ensureColumn(db, 'daily_metrics', 'hrv_source_app', 'hrv_source_app TEXT');
+  await ensureColumn(db, 'daily_metrics', 'hrv_source_key', 'hrv_source_key TEXT');
+  await ensureColumn(db, 'daily_metrics', 'hrv_sample_count', 'hrv_sample_count INTEGER');
+
+  await db.execAsync(`
+    UPDATE health_samples
+    SET hrv_method = CASE canonical_type
+      WHEN 'hrv_rmssd' THEN 'rmssd'
+      WHEN 'hrv_sdnn' THEN 'sdnn'
+      ELSE hrv_method
+    END
+    WHERE hrv_method IS NULL
+      AND canonical_type IN ('hrv_rmssd', 'hrv_sdnn');
+
+    CREATE INDEX IF NOT EXISTS idx_health_samples_hrv_method
+      ON health_samples(hrv_method, canonical_type, local_date);
   `);
 }
 
@@ -954,6 +1289,7 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       timezone TEXT,
       value REAL,
       unit TEXT,
+      hrv_method TEXT,
       metadata_json TEXT NOT NULL,
       source_modified_at TEXT,
       imported_at TEXT NOT NULL
@@ -1021,12 +1357,28 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       protein_g REAL,
       carbs_g REAL,
       fat_g REAL,
+      saturated_fat_g REAL,
+      monounsaturated_fat_g REAL,
+      polyunsaturated_fat_g REAL,
+      trans_fat_g REAL,
       fiber_g REAL,
       sugar_g REAL,
       cholesterol_mg REAL,
       water_ml REAL,
       caffeine_mg REAL,
       sodium_mg REAL,
+      potassium_mg REAL,
+      calcium_mg REAL,
+      iron_mg REAL,
+      magnesium_mg REAL,
+      zinc_mg REAL,
+      vitamin_a_mcg REAL,
+      vitamin_b6_mg REAL,
+      vitamin_b12_mcg REAL,
+      vitamin_c_mg REAL,
+      vitamin_d_mcg REAL,
+      vitamin_e_mg REAL,
+      vitamin_k_mcg REAL,
       entry_count INTEGER NOT NULL,
       meal_count INTEGER,
       all_nutrients_json TEXT NOT NULL,
@@ -1057,6 +1409,11 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       heart_rate_min_bpm REAL,
       heart_rate_max_bpm REAL,
       hrv_last_night_avg REAL,
+      hrv_method TEXT,
+      hrv_canonical_type TEXT,
+      hrv_source_app TEXT,
+      hrv_source_key TEXT,
+      hrv_sample_count INTEGER,
       workout_count INTEGER,
       run_workout_count INTEGER,
       ride_workout_count INTEGER,
@@ -1067,8 +1424,27 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       protein_g REAL,
       carbs_g REAL,
       fat_g REAL,
+      saturated_fat_g REAL,
+      monounsaturated_fat_g REAL,
+      polyunsaturated_fat_g REAL,
+      trans_fat_g REAL,
       fiber_g REAL,
       sugar_g REAL,
+      cholesterol_mg REAL,
+      caffeine_mg REAL,
+      sodium_mg REAL,
+      potassium_mg REAL,
+      calcium_mg REAL,
+      iron_mg REAL,
+      magnesium_mg REAL,
+      zinc_mg REAL,
+      vitamin_a_mcg REAL,
+      vitamin_b6_mg REAL,
+      vitamin_b12_mcg REAL,
+      vitamin_c_mg REAL,
+      vitamin_d_mcg REAL,
+      vitamin_e_mg REAL,
+      vitamin_k_mcg REAL,
       water_ml REAL,
       weight_kg REAL,
       body_fat_pct REAL,
@@ -1110,8 +1486,28 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_health_connect_diagnostics_started
       ON health_connect_diagnostics(sync_started_at);
+
+    CREATE TABLE IF NOT EXISTS goal_profile (
+      id TEXT PRIMARY KEY NOT NULL CHECK (id = 'current'),
+      primary_goal TEXT NOT NULL,
+      secondary_goals_json TEXT NOT NULL,
+      motivation TEXT,
+      timeframe TEXT,
+      experience_level TEXT NOT NULL,
+      preferred_activities_json TEXT NOT NULL,
+      disliked_activities_json TEXT NOT NULL,
+      constraints_json TEXT NOT NULL,
+      risk_flags_json TEXT NOT NULL,
+      coaching_style TEXT NOT NULL,
+      starting_strategy TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
+  await addMissingColumns(db, 'nutrition_daily', nutritionDailyAddedColumns);
+  await addMissingColumns(db, 'daily_metrics', dailyMetricsAddedNutritionColumns);
+  await ensureHrvSchema(db);
   await ensureSyncRunColumns(db);
 
   const legacyColumns = await db.getAllAsync<{ name: string }>(
@@ -1131,9 +1527,9 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
         `
           INSERT OR IGNORE INTO health_samples (
             sample_id, platform, record_type, canonical_type, source_app, source_device,
-            start_at, end_at, local_date, value, unit, metadata_json, imported_at
+            start_at, end_at, local_date, value, unit, hrv_method, metadata_json, imported_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         sample.sampleId,
         sample.platform,
@@ -1146,6 +1542,7 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
         sample.localDate,
         sample.value,
         sample.unit,
+        sample.hrvMethod,
         sample.metadataJson,
         sample.importedAt,
       );
@@ -1187,6 +1584,59 @@ async function ensureSyncRunColumns(db: SQLite.SQLiteDatabase): Promise<void> {
 
 export async function initTrainingStore(): Promise<void> {
   await getDb();
+}
+
+export async function getGoalProfile(): Promise<GoalProfile | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<GoalProfileRow>(
+    "SELECT * FROM goal_profile WHERE id = 'current' LIMIT 1",
+  );
+
+  return row ? toGoalProfile(row) : null;
+}
+
+export async function saveGoalProfile(draft: GoalProfileDraft): Promise<GoalProfile> {
+  const db = await getDb();
+  const current = await getGoalProfile();
+  const next = normalizeGoalProfile(
+    {
+      ...(current ?? {}),
+      ...draft,
+    },
+    new Date().toISOString(),
+  );
+
+  await db.runAsync(
+    `
+      INSERT OR REPLACE INTO goal_profile (
+        id, primary_goal, secondary_goals_json, motivation, timeframe,
+        experience_level, preferred_activities_json, disliked_activities_json,
+        constraints_json, risk_flags_json, coaching_style, starting_strategy,
+        confidence, updated_at
+      )
+      VALUES ('current', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    next.primaryGoal,
+    safeJsonStringify(next.secondaryGoals),
+    next.motivation,
+    next.timeframe,
+    next.experienceLevel,
+    safeJsonStringify(next.preferredActivities),
+    safeJsonStringify(next.dislikedActivities),
+    safeJsonStringify(next.constraints),
+    safeJsonStringify(next.riskFlags),
+    next.coachingStyle,
+    next.startingStrategy,
+    next.confidence,
+    next.updatedAt,
+  );
+
+  return next;
+}
+
+export async function clearGoalProfile(): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("DELETE FROM goal_profile WHERE id = 'current'");
 }
 
 function isHealthConnectDailyAggregate(sample: HealthSample): boolean {
@@ -1253,10 +1703,10 @@ export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
         `
           INSERT OR REPLACE INTO health_samples (
             sample_id, platform, record_type, canonical_type, source_app, source_device,
-            start_at, end_at, local_date, timezone, value, unit, metadata_json,
+            start_at, end_at, local_date, timezone, value, unit, hrv_method, metadata_json,
             source_modified_at, imported_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         sample.sampleId,
         sample.platform,
@@ -1270,6 +1720,7 @@ export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
         sample.timezone ?? null,
         sample.value ?? null,
         sample.unit ?? null,
+        sample.hrvMethod ?? hrvMethodForCanonicalType(sample.canonicalType) ?? null,
         sample.metadataJson,
         sample.sourceModifiedAt ?? null,
         importedAt,
@@ -1347,10 +1798,14 @@ export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
         `
           INSERT OR REPLACE INTO nutrition_daily (
             date, kcal_in, protein_g, carbs_g, fat_g, fiber_g, sugar_g,
-            cholesterol_mg, water_ml, caffeine_mg, sodium_mg, entry_count,
+            saturated_fat_g, monounsaturated_fat_g, polyunsaturated_fat_g,
+            trans_fat_g, cholesterol_mg, water_ml, caffeine_mg, sodium_mg,
+            potassium_mg, calcium_mg, iron_mg, magnesium_mg, zinc_mg,
+            vitamin_a_mcg, vitamin_b6_mg, vitamin_b12_mcg, vitamin_c_mg,
+            vitamin_d_mcg, vitamin_e_mg, vitamin_k_mcg, entry_count,
             meal_count, all_nutrients_json, source_modified_at, imported_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         nutrition.date,
         nutrition.kcalIn ?? null,
@@ -1359,10 +1814,26 @@ export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
         nutrition.fatG ?? null,
         nutrition.fiberG ?? null,
         nutrition.sugarG ?? null,
+        nutrition.saturatedFatG ?? null,
+        nutrition.monounsaturatedFatG ?? null,
+        nutrition.polyunsaturatedFatG ?? null,
+        nutrition.transFatG ?? null,
         nutrition.cholesterolMg ?? null,
         nutrition.waterMl ?? null,
         nutrition.caffeineMg ?? null,
         nutrition.sodiumMg ?? null,
+        nutrition.potassiumMg ?? null,
+        nutrition.calciumMg ?? null,
+        nutrition.ironMg ?? null,
+        nutrition.magnesiumMg ?? null,
+        nutrition.zincMg ?? null,
+        nutrition.vitaminAMcg ?? null,
+        nutrition.vitaminB6Mg ?? null,
+        nutrition.vitaminB12Mcg ?? null,
+        nutrition.vitaminCMg ?? null,
+        nutrition.vitaminDMcg ?? null,
+        nutrition.vitaminEMg ?? null,
+        nutrition.vitaminKMcg ?? null,
         nutrition.entryCount,
         nutrition.mealCount ?? null,
         nutrition.allNutrientsJson,
@@ -1580,6 +2051,83 @@ async function latestValueFor(
   return optionalNumber(row?.value);
 }
 
+async function selectedHrvFor(
+  db: SQLite.SQLiteDatabase,
+  date: string,
+): Promise<HrvRollupRow | null> {
+  return db.getFirstAsync<HrvRollupRow>(
+    `
+      WITH hrv_samples AS (
+        SELECT
+          local_date,
+          canonical_type,
+          COALESCE(
+            hrv_method,
+            CASE canonical_type
+              WHEN 'hrv_rmssd' THEN 'rmssd'
+              WHEN 'hrv_sdnn' THEN 'sdnn'
+            END
+          ) AS hrv_method,
+          COALESCE(NULLIF(source_app, ''), NULLIF(source_device, ''), platform || ':' || record_type)
+            AS source_key,
+          source_app,
+          value,
+          end_at
+        FROM health_samples
+        WHERE canonical_type IN ('hrv_rmssd', 'hrv_sdnn')
+          AND value IS NOT NULL
+      ),
+      source_rank AS (
+        SELECT
+          source_key,
+          canonical_type,
+          hrv_method,
+          COUNT(DISTINCT local_date) AS source_days
+        FROM hrv_samples
+        WHERE hrv_method IS NOT NULL
+        GROUP BY source_key, canonical_type, hrv_method
+      ),
+      day_source AS (
+        SELECT
+          source_key,
+          MAX(source_app) AS source_app,
+          canonical_type,
+          hrv_method,
+          AVG(value) AS value,
+          COUNT(*) AS sample_count,
+          MAX(end_at) AS latest_end_at
+        FROM hrv_samples
+        WHERE local_date = ?
+          AND hrv_method IS NOT NULL
+        GROUP BY source_key, canonical_type, hrv_method
+        HAVING AVG(value) IS NOT NULL
+      )
+      SELECT
+        day_source.source_key,
+        day_source.source_app,
+        day_source.canonical_type,
+        day_source.hrv_method,
+        day_source.value,
+        day_source.sample_count,
+        source_rank.source_days,
+        day_source.latest_end_at
+      FROM day_source
+      LEFT JOIN source_rank
+        ON source_rank.source_key = day_source.source_key
+        AND source_rank.canonical_type = day_source.canonical_type
+        AND source_rank.hrv_method = day_source.hrv_method
+      ORDER BY
+        source_rank.source_days DESC,
+        day_source.sample_count DESC,
+        day_source.latest_end_at DESC,
+        CASE day_source.canonical_type WHEN 'hrv_rmssd' THEN 0 ELSE 1 END ASC,
+        day_source.source_key ASC
+      LIMIT 1
+    `,
+    date,
+  );
+}
+
 async function rebuildDailyMetrics(): Promise<void> {
   const db = await getDb();
   const dates = await distinctMetricDates(db);
@@ -1597,7 +2145,7 @@ async function rebuildDailyMetrics(): Promise<void> {
     const heartRateMin = await valueFor(db, date, 'heart_rate', 'MIN');
     const heartRateMax = await valueFor(db, date, 'heart_rate', 'MAX');
     const restingHr = await valueFor(db, date, 'resting_heart_rate', 'AVG');
-    const hrv = await valueFor(db, date, 'hrv_rmssd', 'AVG');
+    const hrv = await selectedHrvFor(db, date);
     const sleepFallback = await singleSourceSumFor(db, date, 'sleep_session');
     const weightKg = await latestValueFor(db, date, 'weight');
     const bodyFatPct = await latestValueFor(db, date, 'body_fat');
@@ -1621,12 +2169,37 @@ async function rebuildDailyMetrics(): Promise<void> {
       protein_g: number | null;
       carbs_g: number | null;
       fat_g: number | null;
+      saturated_fat_g: number | null;
+      monounsaturated_fat_g: number | null;
+      polyunsaturated_fat_g: number | null;
+      trans_fat_g: number | null;
       fiber_g: number | null;
       sugar_g: number | null;
+      cholesterol_mg: number | null;
+      caffeine_mg: number | null;
+      sodium_mg: number | null;
+      potassium_mg: number | null;
+      calcium_mg: number | null;
+      iron_mg: number | null;
+      magnesium_mg: number | null;
+      zinc_mg: number | null;
+      vitamin_a_mcg: number | null;
+      vitamin_b6_mg: number | null;
+      vitamin_b12_mcg: number | null;
+      vitamin_c_mg: number | null;
+      vitamin_d_mcg: number | null;
+      vitamin_e_mg: number | null;
+      vitamin_k_mcg: number | null;
       water_ml: number | null;
     }>(
       `
-        SELECT kcal_in, protein_g, carbs_g, fat_g, fiber_g, sugar_g, water_ml
+        SELECT
+          kcal_in, protein_g, carbs_g, fat_g, saturated_fat_g,
+          monounsaturated_fat_g, polyunsaturated_fat_g, trans_fat_g,
+          fiber_g, sugar_g, cholesterol_mg, caffeine_mg, sodium_mg,
+          potassium_mg, calcium_mg, iron_mg, magnesium_mg, zinc_mg,
+          vitamin_a_mcg, vitamin_b6_mg, vitamin_b12_mcg, vitamin_c_mg,
+          vitamin_d_mcg, vitamin_e_mg, vitamin_k_mcg, water_ml
         FROM nutrition_daily
         WHERE date = ?
       `,
@@ -1653,7 +2226,12 @@ async function rebuildDailyMetrics(): Promise<void> {
       heartRateAvgBpm: heartRateAvg,
       heartRateMinBpm: heartRateMin,
       heartRateMaxBpm: heartRateMax,
-      hrvLastNightAvg: hrv,
+      hrvLastNightAvg: optionalNumber(hrv?.value),
+      hrvMethod: hrv?.hrv_method ?? undefined,
+      hrvCanonicalType: hrv?.canonical_type ?? undefined,
+      hrvSourceApp: hrv?.source_app ?? undefined,
+      hrvSourceKey: hrv?.source_key ?? undefined,
+      hrvSampleCount: optionalNumber(hrv?.sample_count),
       workout: {
         workoutCount: workout.workout_count,
         runWorkoutCount: workout.run_workout_count,
@@ -1668,8 +2246,27 @@ async function rebuildDailyMetrics(): Promise<void> {
             proteinG: nutrition.protein_g ?? undefined,
             carbsG: nutrition.carbs_g ?? undefined,
             fatG: nutrition.fat_g ?? undefined,
+            saturatedFatG: nutrition.saturated_fat_g ?? undefined,
+            monounsaturatedFatG: nutrition.monounsaturated_fat_g ?? undefined,
+            polyunsaturatedFatG: nutrition.polyunsaturated_fat_g ?? undefined,
+            transFatG: nutrition.trans_fat_g ?? undefined,
             fiberG: nutrition.fiber_g ?? undefined,
             sugarG: nutrition.sugar_g ?? undefined,
+            cholesterolMg: nutrition.cholesterol_mg ?? undefined,
+            caffeineMg: nutrition.caffeine_mg ?? undefined,
+            sodiumMg: nutrition.sodium_mg ?? undefined,
+            potassiumMg: nutrition.potassium_mg ?? undefined,
+            calciumMg: nutrition.calcium_mg ?? undefined,
+            ironMg: nutrition.iron_mg ?? undefined,
+            magnesiumMg: nutrition.magnesium_mg ?? undefined,
+            zincMg: nutrition.zinc_mg ?? undefined,
+            vitaminAMcg: nutrition.vitamin_a_mcg ?? undefined,
+            vitaminB6Mg: nutrition.vitamin_b6_mg ?? undefined,
+            vitaminB12Mcg: nutrition.vitamin_b12_mcg ?? undefined,
+            vitaminCMg: nutrition.vitamin_c_mg ?? undefined,
+            vitaminDMcg: nutrition.vitamin_d_mcg ?? undefined,
+            vitaminEMg: nutrition.vitamin_e_mg ?? undefined,
+            vitaminKMcg: nutrition.vitamin_k_mcg ?? undefined,
             waterMl: nutrition.water_ml ?? undefined,
           }
         : null,
@@ -1687,13 +2284,19 @@ async function rebuildDailyMetrics(): Promise<void> {
           has_steps, has_energy, steps, active_kcal, total_kcal, distance_km,
           sleep_seconds, time_in_bed_seconds, sleep_efficiency, resting_hr,
           heart_rate_avg_bpm, heart_rate_min_bpm, heart_rate_max_bpm,
-          hrv_last_night_avg, workout_count, run_workout_count,
+          hrv_last_night_avg, hrv_method, hrv_canonical_type, hrv_source_app,
+          hrv_source_key, hrv_sample_count, workout_count, run_workout_count,
           ride_workout_count, strength_workout_count, activity_elapsed_seconds,
           activity_kcal, kcal_in, protein_g, carbs_g, fat_g, fiber_g, sugar_g,
+          saturated_fat_g, monounsaturated_fat_g, polyunsaturated_fat_g,
+          trans_fat_g, cholesterol_mg, caffeine_mg, sodium_mg, potassium_mg,
+          calcium_mg, iron_mg, magnesium_mg, zinc_mg, vitamin_a_mcg,
+          vitamin_b6_mg, vitamin_b12_mcg, vitamin_c_mg, vitamin_d_mcg,
+          vitamin_e_mg, vitamin_k_mcg,
           water_ml, weight_kg, body_fat_pct, lean_body_mass_kg, vo2max,
           generated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       daily.date,
       daily.dataCompleteness,
@@ -1717,6 +2320,11 @@ async function rebuildDailyMetrics(): Promise<void> {
       daily.heartRateMinBpm ?? null,
       daily.heartRateMaxBpm ?? null,
       daily.hrvLastNightAvg ?? null,
+      daily.hrvMethod ?? null,
+      daily.hrvCanonicalType ?? null,
+      daily.hrvSourceApp ?? null,
+      daily.hrvSourceKey ?? null,
+      daily.hrvSampleCount ?? null,
       daily.workoutCount ?? null,
       daily.runWorkoutCount ?? null,
       daily.rideWorkoutCount ?? null,
@@ -1729,6 +2337,25 @@ async function rebuildDailyMetrics(): Promise<void> {
       daily.fatG ?? null,
       daily.fiberG ?? null,
       daily.sugarG ?? null,
+      daily.saturatedFatG ?? null,
+      daily.monounsaturatedFatG ?? null,
+      daily.polyunsaturatedFatG ?? null,
+      daily.transFatG ?? null,
+      daily.cholesterolMg ?? null,
+      daily.caffeineMg ?? null,
+      daily.sodiumMg ?? null,
+      daily.potassiumMg ?? null,
+      daily.calciumMg ?? null,
+      daily.ironMg ?? null,
+      daily.magnesiumMg ?? null,
+      daily.zincMg ?? null,
+      daily.vitaminAMcg ?? null,
+      daily.vitaminB6Mg ?? null,
+      daily.vitaminB12Mcg ?? null,
+      daily.vitaminCMg ?? null,
+      daily.vitaminDMcg ?? null,
+      daily.vitaminEMg ?? null,
+      daily.vitaminKMcg ?? null,
       daily.waterMl ?? null,
       daily.weightKg ?? null,
       daily.bodyFatPct ?? null,
@@ -1799,13 +2426,10 @@ function deriveRecommendation(
 
   const baselineRows = history.filter((row) => row.date !== current.date).slice(0, 14);
   const sleepHours = (current.sleepSeconds ?? 0) / 3600;
-  const hrvBaseline = average(baselineRows.map((row) => row.hrvLastNightAvg));
+  const hrvBaseline = hrvBaselineFor(current, history);
   const rhrBaseline = average(baselineRows.map((row) => row.restingHr));
   const sleepBaseline = average(baselineRows.map((row) => row.sleepSeconds));
-  const hrvDelta =
-    current.hrvLastNightAvg != null && hrvBaseline
-      ? current.hrvLastNightAvg - hrvBaseline
-      : undefined;
+  const hrvDelta = hrvBaseline.delta;
   const rhrDelta =
     current.restingHr != null && rhrBaseline ? current.restingHr - rhrBaseline : undefined;
   const sleepDelta =
@@ -1831,11 +2455,17 @@ function deriveRecommendation(
   if (hrvDelta != null) {
     if (hrvDelta > 8) {
       readiness += 16;
-      signals.push(`HRV is up ${Math.round(hrvDelta)} ms`);
+      signals.push(`${hrvMethodLabel(current.hrvMethod)} HRV is up ${Math.round(hrvDelta)} ms`);
     } else if (hrvDelta < -8) {
       readiness -= 22;
-      signals.push(`HRV is down ${Math.abs(Math.round(hrvDelta))} ms`);
+      signals.push(`${hrvMethodLabel(current.hrvMethod)} HRV is down ${Math.abs(Math.round(hrvDelta))} ms`);
     }
+  } else if (current.hrvLastNightAvg != null && hrvBaseline.status === 'method_incompatible') {
+    signals.push(
+      `${hrvMethodLabel(current.hrvMethod)} HRV is available, but incompatible HRV history was ignored`,
+    );
+  } else if (current.hrvLastNightAvg != null && hrvBaseline.status === 'insufficient_baseline') {
+    signals.push(`${hrvMethodLabel(current.hrvMethod)} HRV needs more matching history`);
   }
 
   if (rhrDelta != null) {
@@ -2018,6 +2648,7 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
       timezone: row.timezone ?? undefined,
       value: row.value ?? undefined,
       unit: row.unit ?? undefined,
+      hrvMethod: row.hrv_method ?? undefined,
       metadataJson: row.metadata_json,
       sourceModifiedAt: row.source_modified_at ?? undefined,
     })),
@@ -2104,7 +2735,7 @@ export async function getCoachHealthContext({
       GROUP BY canonical_type
     `),
     db.getAllAsync<LatestSampleByTypeRow>(`
-      SELECT canonical_type, record_type, source_app, local_date, start_at, value, unit
+      SELECT canonical_type, record_type, source_app, local_date, start_at, value, unit, hrv_method
       FROM (
         SELECT
           canonical_type,
@@ -2114,6 +2745,7 @@ export async function getCoachHealthContext({
           start_at,
           value,
           unit,
+          hrv_method,
           ROW_NUMBER() OVER (
             PARTITION BY canonical_type
             ORDER BY start_at DESC, imported_at DESC
@@ -2182,6 +2814,7 @@ export async function getCoachHealthContext({
       startAt: sample.start_at,
       value: sample.value ?? undefined,
       unit: sample.unit ?? undefined,
+      hrvMethod: sample.hrv_method ?? undefined,
     })),
     recentDailyMetrics: dailyRows.map(toDailyMetrics),
     recentWorkouts: recentWorkouts.map((workout) => ({
@@ -2251,6 +2884,7 @@ export async function exportPipelineJson(): Promise<string> {
     syncRuns,
     diagnostics,
     sourceFreshness,
+    goalProfileRow,
   ] =
     await Promise.all([
       db.getAllAsync<HealthSampleRow>('SELECT * FROM health_samples ORDER BY start_at ASC'),
@@ -2261,10 +2895,11 @@ export async function exportPipelineJson(): Promise<string> {
       db.getAllAsync<SyncRunRow>('SELECT * FROM sync_runs ORDER BY started_at ASC'),
       db.getAllAsync('SELECT * FROM health_connect_diagnostics ORDER BY sync_started_at ASC'),
       getSourceFreshness(db),
+      db.getFirstAsync<GoalProfileRow>("SELECT * FROM goal_profile WHERE id = 'current' LIMIT 1"),
     ]);
 
   const payload = {
-    schema: 'biostream_training_pipeline.v3',
+    schema: 'biostream_training_pipeline.v4',
     exportedAt: new Date().toISOString(),
     samples,
     sleepSessions,
@@ -2274,6 +2909,7 @@ export async function exportPipelineJson(): Promise<string> {
     sourceFreshness,
     syncRuns,
     diagnostics,
+    goalProfile: goalProfileRow ? toGoalProfile(goalProfileRow) : null,
   };
 
   const directory = FileSystem.documentDirectory;

@@ -56,6 +56,7 @@ import type {
   CanonicalType,
   DailyMetrics,
   HealthConnectReadDiagnostic,
+  HrvMethod,
   MetricAvailability,
   PipelineSnapshot,
   SourceFreshness,
@@ -152,7 +153,21 @@ const emptySnapshot: PipelineSnapshot = {
 
 type LastSync = Awaited<ReturnType<typeof getLastSyncRun>>;
 type SyncRuns = Awaited<ReturnType<typeof getRecentSyncRuns>>;
-type Tab = 'coach' | 'workout' | 'analytics' | 'history' | 'you';
+type Tab = 'coach' | 'workout' | 'history' | 'you';
+type OnboardingStepId = 'data' | 'analysis' | 'goal' | 'event' | 'constraints';
+
+type OnboardingSuggestion = {
+  title: string;
+  helper: string;
+  prompt: string;
+};
+
+type OnboardingStep = {
+  id: OnboardingStepId;
+  question: string;
+  subtext: string;
+  suggestions: OnboardingSuggestion[];
+};
 
 type MetricStatus = 'live' | 'permission' | 'empty' | 'unchecked';
 
@@ -161,6 +176,22 @@ type CoachConversationMessage = {
   role: 'coach' | 'user';
   text: string;
 };
+
+function resolveOnboardingEvent(goal: string) {
+  const text = goal.toLowerCase();
+
+  if (text.includes('hyrox')) {
+    return {
+      name: 'BYD HYROX Sydney',
+      date: '1-5 July 2026',
+      location: 'Sydney Showground, Sydney Olympic Park, NSW',
+      confidence: 'verified',
+      source: 'internal event database',
+    };
+  }
+
+  return null;
+}
 
 type AnalyticsMetricConfig = {
   id: string;
@@ -183,7 +214,7 @@ const analyticsMetrics: AnalyticsMetricConfig[] = [
   {
     id: 'hrv',
     title: 'HRV',
-    detail: 'RMSSD or Apple SDNN',
+    detail: 'Method-specific RMSSD or SDNN',
     types: ['hrv_rmssd', 'hrv_sdnn'],
     icon: HeartPulse,
     gap: 'Connect a source that writes HRV to Health Connect or Apple Health.',
@@ -264,6 +295,17 @@ function formatNumber(value?: number, digits = 0): string {
   });
 }
 
+function hrvMethodLabel(method?: HrvMethod): string {
+  if (method === 'rmssd') return 'RMSSD';
+  if (method === 'sdnn') return 'SDNN';
+  return 'HRV';
+}
+
+function hrvMetricLabel(day?: DailyMetrics | null): string {
+  const method = hrvMethodLabel(day?.hrvMethod);
+  return day?.hrvLastNightAvg == null || method === 'HRV' ? 'HRV' : `HRV ${method}`;
+}
+
 function formatDateKey(date?: string): string {
   if (!date) {
     return formatDisplayDate(new Date());
@@ -279,7 +321,7 @@ function metricLabel(type: CanonicalType): string {
     distance: 'Distance',
     heart_rate: 'Heart rate',
     hydration: 'Hydration',
-    hrv_rmssd: 'HRV',
+    hrv_rmssd: 'HRV RMSSD',
     hrv_sdnn: 'HRV SDNN',
     lean_body_mass: 'Lean mass',
     nutrition: 'Nutrition',
@@ -598,6 +640,7 @@ function CoachScreen({
   const plan = useMemo(() => generateTrainingPlan(snapshot, 'run'), [snapshot]);
   const sleep = current?.sleepSeconds ? formatDuration(current.sleepSeconds) : '—';
   const hrv = current?.hrvLastNightAvg ? `${Math.round(current.hrvLastNightAvg)} ms` : '—';
+  const hrvLabel = hrvMetricLabel(current);
   const rhr = current?.restingHr ? `${Math.round(current.restingHr)} bpm` : '—';
   const quickReplies = ['Make it easier', 'Move it to tomorrow', "I'm short on time"];
   const canSendCoachMessage = hasOpenAiApiKey && !coachBusy && Boolean(coachDraft.trim());
@@ -663,7 +706,7 @@ function CoachScreen({
           <View style={styles.metricGridFull}>
             <SmallMetric label="Sleep" value={sleep} />
             <SmallMetric label="Score" value={formatNumber(recommendation.readiness ?? undefined)} />
-            <SmallMetric label="HRV" value={hrv.replace(' ms', '')} />
+            <SmallMetric label={hrvLabel} value={hrv.replace(' ms', '')} />
             <SmallMetric label="RHR" value={rhr.replace(' bpm', '')} />
           </View>
           <Text style={styles.helpText}>{recommendation.reason}</Text>
@@ -1119,12 +1162,34 @@ function WorkoutItem({ workout }: { workout: WorkoutRecord }) {
 }
 
 function SignalTrendChart({ history }: { history: DailyMetrics[] }) {
-  const values = history
-    .slice()
-    .reverse()
-    .slice(-7)
-    .map((day) => day.hrvLastNightAvg ?? day.restingHr ?? 0);
-  const labels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  const chronological = history.slice().reverse();
+  const hrvDays = chronological.filter((day) => day.hrvLastNightAvg != null);
+  const latestHrvDay = hrvDays[hrvDays.length - 1];
+  const compatibleDays = latestHrvDay
+    ? chronological.filter((day) => {
+        if (day.hrvLastNightAvg == null || day.hrvMethod !== latestHrvDay.hrvMethod) {
+          return false;
+        }
+        if (
+          day.hrvCanonicalType &&
+          latestHrvDay.hrvCanonicalType &&
+          day.hrvCanonicalType !== latestHrvDay.hrvCanonicalType
+        ) {
+          return false;
+        }
+
+        if (day.hrvSourceKey || latestHrvDay.hrvSourceKey) {
+          return day.hrvSourceKey === latestHrvDay.hrvSourceKey;
+        }
+
+        return true;
+      })
+    : [];
+  const chartDays = compatibleDays.slice(-7);
+  const values = chartDays.map((day) => day.hrvLastNightAvg ?? 0);
+  const labels = chartDays.map((day) =>
+    new Date(`${day.date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 1),
+  );
   const max = Math.max(...values, 1);
   const min = Math.min(...values, 0);
   const range = max - min || 1;
@@ -1134,26 +1199,37 @@ function SignalTrendChart({ history }: { history: DailyMetrics[] }) {
     return [x, y];
   });
   const line = points.map(([x, y], index) => `${index === 0 ? 'M' : 'L'}${x},${y}`).join(' ');
+  const latestValue = values[values.length - 1];
+  const baselineValues = values.slice(0, -1);
+  const baseline = baselineValues.length
+    ? baselineValues.reduce((sum, value) => sum + value, 0) / baselineValues.length
+    : undefined;
+  const delta = latestValue != null && baseline != null ? latestValue - baseline : undefined;
+  const sectionTitle = `${hrvMetricLabel(latestHrvDay)} · 7-day`;
 
   return (
     <View style={styles.signalChart}>
       <View style={styles.signalChartHeader}>
         <View>
-          <SectionLabel>HRV · 7-day</SectionLabel>
+          <SectionLabel>{sectionTitle}</SectionLabel>
           <View style={styles.signalValueLine}>
-            <Text style={styles.signalValue}>{formatNumber(values[values.length - 1], 0)}</Text>
+            <Text style={styles.signalValue}>{formatNumber(latestValue, 0)}</Text>
             <Text style={styles.signalUnit}>ms</Text>
           </View>
         </View>
         <View style={styles.signalBaseline}>
           <Text style={styles.signalBaselineText}>vs baseline</Text>
-          <Text style={styles.signalDelta}>+2 ms</Text>
+          <Text style={styles.signalDelta}>
+            {delta == null ? '—' : `${delta > 0 ? '+' : ''}${formatNumber(delta, 0)} ms`}
+          </Text>
         </View>
       </View>
       <Svg height={150} width="100%" viewBox="0 0 300 150" preserveAspectRatio="none">
         <Rect fill={tokens.surfaceAlt} height={82} width={264} x={18} y={44} />
         <Path d="M18,86 L282,86" stroke={tokens.line} strokeDasharray="4 4" strokeWidth={1.4} />
-        <Path d={line} fill="none" stroke={tokens.cool} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.4} />
+        {line ? (
+          <Path d={line} fill="none" stroke={tokens.cool} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.4} />
+        ) : null}
         {points.map(([x, y], index) => (
           <Circle cx={x} cy={y} fill={tokens.cool} key={`${x}-${y}-${index}`} r={3} />
         ))}
@@ -1354,7 +1430,7 @@ function ScoreboardRow({
   );
 }
 
-function AnalyticsScreen({ snapshot, lastSync }: { snapshot: PipelineSnapshot; lastSync: LastSync }) {
+function AnalyticsPanel({ snapshot, lastSync }: { snapshot: PipelineSnapshot; lastSync: LastSync }) {
   const scoredMetrics = analyticsMetrics.map((config) => {
     const availability = availabilityForTypes(snapshot.metricAvailability, config.types);
     const diagnostics = diagnosticsForTypes(snapshot.latestDiagnostics, config.types);
@@ -1368,49 +1444,44 @@ function AnalyticsScreen({ snapshot, lastSync }: { snapshot: PipelineSnapshot; l
   const topGaps = scoredMetrics.filter((metric) => metric.status !== 'live').slice(0, 3);
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.pageHeader}>
-        <Text style={styles.pageEyebrow}>Pipeline scoreboard</Text>
-        <Text style={styles.pageTitle}>Analytics</Text>
+    <>
+      <SectionLabel>Analytics</SectionLabel>
+      <View style={styles.summaryGrid}>
+        <SmallMetric label="Coverage days" value={formatNumber(snapshot.coverageDays)} />
+        <SmallMetric label="Live metrics" value={`${liveCount}/${analyticsMetrics.length}`} />
+        <SmallMetric label="Open gaps" value={formatNumber(gapCount)} />
+        <SmallMetric label="Raw samples" value={formatNumber(snapshot.totalSamples)} />
       </View>
-      <ScrollView contentContainerStyle={styles.pageContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.summaryGrid}>
-          <SmallMetric label="Coverage days" value={formatNumber(snapshot.coverageDays)} />
-          <SmallMetric label="Live metrics" value={`${liveCount}/${analyticsMetrics.length}`} />
-          <SmallMetric label="Open gaps" value={formatNumber(gapCount)} />
-          <SmallMetric label="Raw samples" value={formatNumber(snapshot.totalSamples)} />
-        </View>
 
-        <SectionLabel>Data availability</SectionLabel>
-        <View style={styles.scoreList}>
-          {analyticsMetrics.map((config) => (
-            <ScoreboardRow config={config} key={config.id} snapshot={snapshot} />
-          ))}
-        </View>
+      <SectionLabel>Data availability</SectionLabel>
+      <View style={styles.scoreList}>
+        {analyticsMetrics.map((config) => (
+          <ScoreboardRow config={config} key={config.id} snapshot={snapshot} />
+        ))}
+      </View>
 
-        <SectionLabel>Gaps to close</SectionLabel>
-        <View style={styles.gapList}>
-          {topGaps.length ? (
-            topGaps.map(({ config }) => (
-              <View key={config.id} style={styles.gapRow}>
-                <Text style={styles.gapTitle}>{config.title}</Text>
-                <Text style={styles.gapDetail}>{config.gap}</Text>
-              </View>
-            ))
-          ) : (
-            <Text style={styles.emptyText}>Core metrics are available for the current dataset.</Text>
-          )}
-        </View>
+      <SectionLabel>Gaps to close</SectionLabel>
+      <View style={styles.gapList}>
+        {topGaps.length ? (
+          topGaps.map(({ config }) => (
+            <View key={config.id} style={styles.gapRow}>
+              <Text style={styles.gapTitle}>{config.title}</Text>
+              <Text style={styles.gapDetail}>{config.gap}</Text>
+            </View>
+          ))
+        ) : (
+          <Text style={styles.emptyText}>Core metrics are available for the current dataset.</Text>
+        )}
+      </View>
 
-        <View style={styles.privacyCard}>
-          <Database color={tokens.muted} size={16} strokeWidth={2} />
-          <Text style={styles.privacyText}>
-            Scores reflect local records already imported into the on-device SQLite pipeline.
-            {` ${dataAge(lastSync)}.`}
-          </Text>
-        </View>
-      </ScrollView>
-    </View>
+      <View style={styles.privacyCard}>
+        <Database color={tokens.muted} size={16} strokeWidth={2} />
+        <Text style={styles.privacyText}>
+          Scores reflect local records already imported into the on-device SQLite pipeline.
+          {` ${dataAge(lastSync)}.`}
+        </Text>
+      </View>
+    </>
   );
 }
 
@@ -1759,6 +1830,8 @@ function SourceScreen({
           )}
         </View>
 
+        <AnalyticsPanel lastSync={lastSync} snapshot={snapshot} />
+
         <SectionLabel>Local app settings</SectionLabel>
         <View style={styles.settingsCard}>
           <View style={styles.settingsHeader}>
@@ -1907,11 +1980,345 @@ function SourceScreen({
   );
 }
 
+function CoachOnboardingScreen({
+  busy,
+  canSync,
+  onComplete,
+  onSync,
+  sourceLabel,
+  status,
+  snapshot,
+}: {
+  busy: boolean;
+  canSync: boolean;
+  onComplete: (goal: string) => void;
+  onSync: () => void;
+  sourceLabel: string;
+  status: string;
+  snapshot: PipelineSnapshot;
+}) {
+  const [activeStepIndex, setActiveStepIndex] = useState(0);
+  const [composerDraft, setComposerDraft] = useState('');
+  const [goalText, setGoalText] = useState('');
+  const [answers, setAnswers] = useState<Record<OnboardingStepId, string>>({
+    data: '',
+    analysis: '',
+    goal: '',
+    event: '',
+    constraints: '',
+  });
+  const athleteName: string | undefined = undefined;
+  const welcomeLine = athleteName
+    ? `Hello ${athleteName}, welcome to BioStream.`
+    : 'Hello, welcome to BioStream.';
+  const connectLabel = `Connect ${sourceLabel}`;
+  const eventMatch = resolveOnboardingEvent(goalText);
+  const hasSyncedData =
+    snapshot.totalSamples > 0 ||
+    snapshot.workoutCount > 0 ||
+    snapshot.sleepCount > 0 ||
+    snapshot.nutritionDays > 0 ||
+    snapshot.coverageDays > 0;
+  const analysisQuestion = hasSyncedData
+    ? 'I’ve analysed your connected history. Here’s what I can see so far.'
+    : 'I don’t have wearable history yet, so I’ll start conservatively and treat this as a baseline-first setup.';
+  const analysisSubtext = hasSyncedData
+    ? `I found ${formatNumber(snapshot.totalSamples)} records, ${formatNumber(snapshot.workoutCount)} workouts, and ${formatNumber(snapshot.sleepCount)} sleep nights. I’ll use this to avoid over-prescribing.`
+    : 'You can still continue. Once you connect Apple Health or Health Connect, I’ll replace assumptions with real sleep, recovery, and training history.';
+  const eventQuestion = eventMatch
+    ? `I found a likely match: ${eventMatch.name}. Is this the one?`
+    : 'I could not confidently match an event yet. I can keep searching while we start with a safe first block.';
+  const eventSubtext = eventMatch
+    ? `${eventMatch.date} · ${eventMatch.location} · ${eventMatch.confidence} match from the ${eventMatch.source}.`
+    : 'If you name the city or organiser, I will try to resolve the event automatically instead of making you fill in the details.';
+  const eventSuggestions: OnboardingSuggestion[] = eventMatch
+    ? [
+        {
+          title: "Yes, that's it",
+          helper: eventMatch.source,
+          prompt: `Use ${eventMatch.name}, ${eventMatch.date}, at ${eventMatch.location}.`,
+        },
+        {
+          title: 'Different event',
+          helper: 'Keep searching',
+          prompt: 'That is not the right event. Search for another event match before locking the plan.',
+        },
+        {
+          title: 'No event',
+          helper: 'Outcome goal',
+          prompt: 'Do not lock an event yet. Build a general training plan around my goal.',
+        },
+      ]
+    : [
+        {
+          title: 'Keep searching',
+          helper: 'AI lookup',
+          prompt: 'Keep searching for the event using my goal text and location context.',
+        },
+        {
+          title: 'No event',
+          helper: 'Outcome goal',
+          prompt: 'There is no event. Build a sustainable plan around my outcome goal.',
+        },
+      ];
+  const steps: OnboardingStep[] = [
+    {
+      id: 'data',
+      question: welcomeLine,
+      subtext: `Let’s connect up your data so I can get started. I’ll pull what I can from ${sourceLabel}, look at your recent training, sleep, recovery, and any gaps, then we’ll talk about what you’re working toward.`,
+      suggestions: [
+        {
+          title: connectLabel,
+          helper: sourceLabel,
+          prompt: `Connect ${sourceLabel} and analyse my wearable and workout history first.`,
+        },
+        {
+          title: 'Skip for now',
+          helper: 'Manual start',
+          prompt: 'Skip data connection for now. Start with safe assumptions and ask me later.',
+        },
+      ],
+    },
+    {
+      id: 'analysis',
+      question: analysisQuestion,
+      subtext: analysisSubtext,
+      suggestions: [
+        {
+          title: 'Looks right',
+          helper: 'Continue',
+          prompt: 'That looks right. Use this analysis as the starting point.',
+        },
+        {
+          title: 'Be conservative',
+          helper: 'Safety first',
+          prompt: 'Be conservative until you have more reliable training history.',
+        },
+      ],
+    },
+    {
+      id: 'goal',
+      question: 'Now, what event or outcome are we training for?',
+      subtext: 'You can answer naturally. I’ll resolve events myself where I can, then ask only for the details I cannot infer.',
+      suggestions: [
+        {
+          title: 'HYROX',
+          helper: 'Event goal',
+          prompt: 'I am training for HYROX and want to finish under 90 minutes.',
+        },
+        {
+          title: 'Run event',
+          helper: 'Race goal',
+          prompt: 'I am training for a half marathon and want to finish under 2 hours.',
+        },
+        {
+          title: 'Strength',
+          helper: 'Training goal',
+          prompt: 'I want to build strength and train 4 days a week.',
+        },
+      ],
+    },
+    {
+      id: 'event',
+      question: eventQuestion,
+      subtext: eventSubtext,
+      suggestions: eventSuggestions,
+    },
+    {
+      id: 'constraints',
+      question: 'Any constraints I should respect from day one?',
+      subtext: 'Injuries, equipment access, schedule, recovery, travel, and preferred training days change the plan more than people expect.',
+      suggestions: [
+        {
+          title: 'Equipment',
+          helper: 'HYROX readiness',
+          prompt: 'I have gym access but not always sleds or ski erg.',
+        },
+        {
+          title: 'Schedule',
+          helper: 'Availability',
+          prompt: 'I can train 4 days per week, usually before work.',
+        },
+        {
+          title: 'Injury risk',
+          helper: 'Guardrail',
+          prompt: 'I have had some niggles, so keep the first few weeks conservative.',
+        },
+      ],
+    },
+  ];
+  const activeStep = steps[activeStepIndex] ?? steps[0]!;
+  const activeAnswer = answers[activeStep.id];
+  const canSend = composerDraft.trim().length > 2;
+  const isDataStep = activeStep.id === 'data';
+  const isFinalStep = activeStep.id === 'constraints';
+  const completedSteps = steps.slice(0, activeStepIndex).filter((step) => Boolean(answers[step.id]));
+
+  function answerStep(value: string) {
+    const nextValue = value.trim();
+    if (!nextValue) return;
+
+    setAnswers((current) => ({
+      ...current,
+      [activeStep.id]: nextValue,
+    }));
+    setComposerDraft('');
+
+    if (activeStep.id === 'goal') {
+      setGoalText(nextValue);
+    }
+
+    if (activeStep.id === 'data') {
+      if (nextValue.toLowerCase().includes('connect')) {
+        onSync();
+      }
+      setActiveStepIndex((index) => Math.min(index + 1, steps.length - 1));
+      return;
+    }
+
+    if (activeStep.id === 'constraints') {
+      onComplete(goalText || 'Training with recovery-aware adjustments.');
+      return;
+    }
+
+    setActiveStepIndex((index) => Math.min(index + 1, steps.length - 1));
+  }
+
+  return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={styles.screen}
+    >
+      <View style={styles.topBar}>
+        <View style={styles.topBarLeft}>
+          <CoachAvatar size={32} />
+          <View>
+            <Text style={styles.topTitle}>Coach</Text>
+            <Text style={styles.topMeta}>Connect. Analyse. Plan.</Text>
+          </View>
+        </View>
+        <MoreHorizontal color={tokens.muted} size={22} strokeWidth={2} />
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.feed}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={styles.dateDivider}>Setup</Text>
+        <View style={styles.onboardingProgress}>
+          {steps.map((step, index) => (
+            <View
+              key={step.id}
+              style={[
+                styles.onboardingProgressDot,
+                index <= activeStepIndex && styles.onboardingProgressDotActive,
+              ]}
+            />
+          ))}
+        </View>
+
+        {completedSteps.map((step) => (
+          <View key={step.id} style={styles.onboardingThreadBlock}>
+            <CoachLine>{step.question}</CoachLine>
+            <UserBubble>{answers[step.id] ?? ''}</UserBubble>
+          </View>
+        ))}
+
+        <CoachLine>{activeStep.question}</CoachLine>
+        <DataCard accent={tokens.ink} inset label={activeStep.id === 'data' ? 'Datasource' : 'Coach setup'}>
+          <Text style={styles.helpText}>{activeStep.subtext}</Text>
+          {activeStep.id === 'analysis' ? (
+            <View style={styles.metricGridFull}>
+              <SmallMetric label="Records" value={formatNumber(snapshot.totalSamples)} />
+              <SmallMetric label="Workouts" value={formatNumber(snapshot.workoutCount)} />
+              <SmallMetric label="Sleep" value={formatNumber(snapshot.sleepCount)} />
+              <SmallMetric label="Readiness" value={snapshot.recommendation.readinessLabel} />
+            </View>
+          ) : null}
+          {activeStep.id === 'data' ? (
+            <View style={styles.singleAction}>
+              <AppButton
+                disabled={!canSync || busy}
+                icon={RefreshCw}
+                label={busy ? status : connectLabel}
+                onPress={() => answerStep(`Connect ${sourceLabel} now.`)}
+                variant="primary"
+              />
+            </View>
+          ) : null}
+        </DataCard>
+
+        {!activeAnswer ? (
+          <View style={styles.suggestedReplyWrap}>
+            <SectionLabel>Suggested replies</SectionLabel>
+            <View style={styles.setupCardGrid}>
+              {activeStep.suggestions.map((suggestion) => (
+                <Pressable
+                  accessibilityRole="button"
+                  key={suggestion.title}
+                  onPress={() => answerStep(suggestion.prompt)}
+                  style={({ pressed }) => [styles.setupOptionCard, pressed && styles.pressed]}
+                >
+                  <Text style={styles.setupOptionTitle}>{suggestion.title}</Text>
+                  <Text style={styles.setupOptionHelper}>{suggestion.helper}</Text>
+                  <Text style={styles.setupOptionText}>{suggestion.prompt}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
+      </ScrollView>
+
+      <View style={styles.composer}>
+        <View style={styles.composerInput}>
+          <TextInput
+            accessibilityLabel="Message your coach"
+            autoCorrect
+            cursorColor={tokens.ink}
+            onChangeText={setComposerDraft}
+            onSubmitEditing={() => {
+              if (canSend) answerStep(composerDraft);
+            }}
+            placeholder={isDataStep ? `Connect ${sourceLabel} or skip...` : 'Message your coach...'}
+            placeholderTextColor={tokens.muted}
+            returnKeyType="send"
+            selectionColor={tokens.ink}
+            style={styles.composerTextInput}
+            value={composerDraft}
+          />
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          disabled={!isDataStep && !isFinalStep && !canSend}
+          onPress={() => {
+            if (isDataStep && !composerDraft.trim()) {
+              answerStep('Skip data connection for now.');
+              return;
+            }
+            if (isFinalStep && !composerDraft.trim()) {
+              answerStep('No other constraints for now.');
+              return;
+            }
+            answerStep(composerDraft);
+          }}
+          style={({ pressed }) => [
+            styles.sendButton,
+            !isDataStep && !isFinalStep && !canSend && styles.disabled,
+            pressed && styles.pressed,
+          ]}
+        >
+          <ArrowRight color={tokens.surface} size={18} strokeWidth={2.3} />
+        </Pressable>
+      </View>
+    </KeyboardAvoidingView>
+  );
+}
+
 function TabBar({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {
   const tabs: { id: Tab; label: string; icon: LucideIcon }[] = [
     { id: 'coach', label: 'Coach', icon: Sparkles },
     { id: 'workout', label: 'Workout', icon: Dumbbell },
-    { id: 'analytics', label: 'Analytics', icon: ChartColumn },
     { id: 'history', label: 'History', icon: History },
     { id: 'you', label: 'You', icon: User },
   ];
@@ -1948,6 +2355,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('coach');
   const [rangeDays, setRangeDays] = useState(baselineRangeDays);
   const [snapshot, setSnapshot] = useState<PipelineSnapshot>(emptySnapshot);
+  const [goalText, setGoalText] = useState('');
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
   const [lastSync, setLastSync] = useState<LastSync>(null);
   const [lastSuccessfulSync, setLastSuccessfulSync] = useState<LastSync>(null);
   const [recentSyncRuns, setRecentSyncRuns] = useState<SyncRuns>([]);
@@ -2172,7 +2581,22 @@ export default function App() {
         keyboardVerticalOffset={0}
         style={styles.appShell}
       >
-        {activeTab === 'coach' ? (
+        {!hasCompletedOnboarding ? (
+          <CoachOnboardingScreen
+            busy={busy}
+            canSync={canSync}
+            onComplete={(nextGoal) => {
+              setGoalText(nextGoal);
+              setHasCompletedOnboarding(true);
+              setActiveTab('coach');
+            }}
+            onSync={runSync}
+            sourceLabel={canSync ? currentHealthProviderLabel() : 'Apple Health / Health Connect'}
+            status={status}
+            snapshot={snapshot}
+          />
+        ) : null}
+        {hasCompletedOnboarding && activeTab === 'coach' ? (
           <CoachScreen
             busy={busy}
             coachBusy={coachBusy}
@@ -2189,12 +2613,9 @@ export default function App() {
             warnings={warnings}
           />
         ) : null}
-        {activeTab === 'workout' ? <WorkoutPlanScreen snapshot={snapshot} /> : null}
-        {activeTab === 'analytics' ? (
-          <AnalyticsScreen lastSync={lastSync} snapshot={snapshot} />
-        ) : null}
-        {activeTab === 'history' ? <HistoryScreen snapshot={snapshot} /> : null}
-        {activeTab === 'you' ? (
+        {hasCompletedOnboarding && activeTab === 'workout' ? <WorkoutPlanScreen snapshot={snapshot} /> : null}
+        {hasCompletedOnboarding && activeTab === 'history' ? <HistoryScreen snapshot={snapshot} /> : null}
+        {hasCompletedOnboarding && activeTab === 'you' ? (
           <SourceScreen
             apiKeyDraft={apiKeyDraft}
             appSettings={appSettings}
@@ -2217,7 +2638,18 @@ export default function App() {
             status={status}
           />
         ) : null}
-        {!keyboardVisible ? <TabBar active={activeTab} onChange={setActiveTab} /> : null}
+        {!keyboardVisible ? (
+          <TabBar
+            active={hasCompletedOnboarding ? activeTab : 'coach'}
+            onChange={(tab) => {
+              if (hasCompletedOnboarding) {
+                setActiveTab(tab);
+              } else {
+                setActiveTab('coach');
+              }
+            }}
+          />
+        ) : null}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -2235,6 +2667,61 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: tokens.bg,
+  },
+  onboardingProgress: {
+    backgroundColor: tokens.bgDeep,
+    borderRadius: 8,
+    flexDirection: 'row',
+    gap: 4,
+    padding: 4,
+  },
+  onboardingProgressDot: {
+    backgroundColor: tokens.lineSoft,
+    borderRadius: 4,
+    flex: 1,
+    height: 5,
+  },
+  onboardingProgressDotActive: {
+    backgroundColor: tokens.ink,
+  },
+  onboardingThreadBlock: {
+    gap: 8,
+  },
+  suggestedReplyWrap: {
+    gap: 8,
+    marginLeft: 42,
+  },
+  setupCardGrid: {
+    gap: 10,
+  },
+  setupOptionCard: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 4,
+    minHeight: 68,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  setupOptionTitle: {
+    color: tokens.ink,
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  setupOptionHelper: {
+    color: tokens.accent,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0,
+    textTransform: 'uppercase',
+  },
+  setupOptionText: {
+    color: tokens.muted,
+    fontSize: 13,
+    letterSpacing: 0,
+    lineHeight: 19,
   },
   topBar: {
     alignItems: 'center',

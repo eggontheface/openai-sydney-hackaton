@@ -1,5 +1,12 @@
 import { localDateKey } from '../lib/dates';
-import type { CanonicalType, DailyMetrics, HealthProvider } from '../health/types';
+import type {
+  CanonicalType,
+  DailyMetrics,
+  HealthProvider,
+  HrvBaselineStatus,
+  HrvCanonicalType,
+  HrvMethod,
+} from '../health/types';
 
 export type DailyWorkoutRollup = {
   workoutCount: number;
@@ -15,8 +22,27 @@ export type DailyNutritionRollup = {
   proteinG?: number;
   carbsG?: number;
   fatG?: number;
+  saturatedFatG?: number;
+  monounsaturatedFatG?: number;
+  polyunsaturatedFatG?: number;
+  transFatG?: number;
   fiberG?: number;
   sugarG?: number;
+  cholesterolMg?: number;
+  caffeineMg?: number;
+  sodiumMg?: number;
+  potassiumMg?: number;
+  calciumMg?: number;
+  ironMg?: number;
+  magnesiumMg?: number;
+  zincMg?: number;
+  vitaminAMcg?: number;
+  vitaminB6Mg?: number;
+  vitaminB12Mcg?: number;
+  vitaminCMg?: number;
+  vitaminDMcg?: number;
+  vitaminEMg?: number;
+  vitaminKMcg?: number;
   waterMl?: number;
 };
 
@@ -42,6 +68,11 @@ export type DailyMetricsRollupInput = {
   heartRateMinBpm?: number;
   heartRateMaxBpm?: number;
   hrvLastNightAvg?: number;
+  hrvMethod?: HrvMethod;
+  hrvCanonicalType?: HrvCanonicalType;
+  hrvSourceApp?: string;
+  hrvSourceKey?: string;
+  hrvSampleCount?: number;
   workout: DailyWorkoutRollup;
   nutrition?: DailyNutritionRollup | null;
   weightKg?: number;
@@ -76,8 +107,14 @@ export type NormalizedLegacyHealthSample = {
   localDate: string;
   value: number | null;
   unit: string | null;
+  hrvMethod: HrvMethod | null;
   metadataJson: string;
   importedAt: string;
+};
+
+const hrvMethodByCanonicalType: Partial<Record<CanonicalType, HrvMethod>> = {
+  hrv_rmssd: 'rmssd',
+  hrv_sdnn: 'sdnn',
 };
 
 function optionalNumber(value: number | null | undefined): number | undefined {
@@ -86,6 +123,110 @@ function optionalNumber(value: number | null | undefined): number | undefined {
 
 function hasValue(value: number | null | undefined): boolean {
   return value != null;
+}
+
+function average(values: number[]): number | undefined {
+  if (!values.length) {
+    return undefined;
+  }
+
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+export function hrvMethodForCanonicalType(type: CanonicalType): HrvMethod | undefined {
+  return hrvMethodByCanonicalType[type];
+}
+
+export function hrvMethodLabel(method?: HrvMethod): string {
+  if (method === 'rmssd') return 'RMSSD';
+  if (method === 'sdnn') return 'SDNN';
+  return 'HRV';
+}
+
+type HrvComparableDay = Pick<
+  DailyMetrics,
+  'date' | 'hrvLastNightAvg' | 'hrvMethod' | 'hrvCanonicalType' | 'hrvSourceKey'
+>;
+
+export type HrvBaselineResult = {
+  status: HrvBaselineStatus;
+  baseline?: number;
+  delta?: number;
+  compatibleDays: number;
+  incompatibleDays: number;
+  method?: HrvMethod;
+  canonicalType?: HrvCanonicalType;
+  sourceKey?: string;
+};
+
+function hasCompatibleHrvKey(current: HrvComparableDay, candidate: HrvComparableDay): boolean {
+  if (candidate.hrvLastNightAvg == null) {
+    return false;
+  }
+
+  if (
+    !current.hrvMethod ||
+    !candidate.hrvMethod ||
+    current.hrvMethod !== candidate.hrvMethod
+  ) {
+    return false;
+  }
+
+  if (
+    current.hrvCanonicalType &&
+    candidate.hrvCanonicalType &&
+    current.hrvCanonicalType !== candidate.hrvCanonicalType
+  ) {
+    return false;
+  }
+
+  if (current.hrvSourceKey || candidate.hrvSourceKey) {
+    return current.hrvSourceKey === candidate.hrvSourceKey;
+  }
+
+  return true;
+}
+
+export function hrvBaselineFor(
+  current: HrvComparableDay | null | undefined,
+  history: HrvComparableDay[],
+  maxDays = 14,
+): HrvBaselineResult {
+  if (current?.hrvLastNightAvg == null || !current.hrvMethod) {
+    return {
+      status: 'missing_current',
+      compatibleDays: 0,
+      incompatibleDays: 0,
+    };
+  }
+
+  const baselineRows = history.filter((row) => row.date !== current.date).slice(0, maxDays);
+  const hrvRows = baselineRows.filter((row) => row.hrvLastNightAvg != null);
+  const compatibleRows = hrvRows.filter((row) => hasCompatibleHrvKey(current, row));
+  const incompatibleDays = hrvRows.length - compatibleRows.length;
+  const baseline = average(compatibleRows.map((row) => row.hrvLastNightAvg as number));
+
+  if (baseline == null) {
+    return {
+      status: incompatibleDays ? 'method_incompatible' : 'insufficient_baseline',
+      compatibleDays: 0,
+      incompatibleDays,
+      method: current.hrvMethod,
+      canonicalType: current.hrvCanonicalType,
+      sourceKey: current.hrvSourceKey,
+    };
+  }
+
+  return {
+    status: 'compatible',
+    baseline,
+    delta: current.hrvLastNightAvg - baseline,
+    compatibleDays: compatibleRows.length,
+    incompatibleDays,
+    method: current.hrvMethod,
+    canonicalType: current.hrvCanonicalType,
+    sourceKey: current.hrvSourceKey,
+  };
 }
 
 export function buildDailyMetricsRollup(input: DailyMetricsRollupInput): DailyMetrics {
@@ -146,6 +287,11 @@ export function buildDailyMetricsRollup(input: DailyMetricsRollupInput): DailyMe
     heartRateMinBpm: optionalNumber(input.heartRateMinBpm),
     heartRateMaxBpm: optionalNumber(input.heartRateMaxBpm),
     hrvLastNightAvg: optionalNumber(input.hrvLastNightAvg),
+    hrvMethod: input.hrvMethod,
+    hrvCanonicalType: input.hrvCanonicalType,
+    hrvSourceApp: input.hrvSourceApp,
+    hrvSourceKey: input.hrvSourceKey,
+    hrvSampleCount: optionalNumber(input.hrvSampleCount),
     workoutCount: input.workout.workoutCount,
     runWorkoutCount: input.workout.runWorkoutCount,
     rideWorkoutCount: input.workout.rideWorkoutCount,
@@ -156,8 +302,27 @@ export function buildDailyMetricsRollup(input: DailyMetricsRollupInput): DailyMe
     proteinG: optionalNumber(input.nutrition?.proteinG),
     carbsG: optionalNumber(input.nutrition?.carbsG),
     fatG: optionalNumber(input.nutrition?.fatG),
+    saturatedFatG: optionalNumber(input.nutrition?.saturatedFatG),
+    monounsaturatedFatG: optionalNumber(input.nutrition?.monounsaturatedFatG),
+    polyunsaturatedFatG: optionalNumber(input.nutrition?.polyunsaturatedFatG),
+    transFatG: optionalNumber(input.nutrition?.transFatG),
     fiberG: optionalNumber(input.nutrition?.fiberG),
     sugarG: optionalNumber(input.nutrition?.sugarG),
+    cholesterolMg: optionalNumber(input.nutrition?.cholesterolMg),
+    caffeineMg: optionalNumber(input.nutrition?.caffeineMg),
+    sodiumMg: optionalNumber(input.nutrition?.sodiumMg),
+    potassiumMg: optionalNumber(input.nutrition?.potassiumMg),
+    calciumMg: optionalNumber(input.nutrition?.calciumMg),
+    ironMg: optionalNumber(input.nutrition?.ironMg),
+    magnesiumMg: optionalNumber(input.nutrition?.magnesiumMg),
+    zincMg: optionalNumber(input.nutrition?.zincMg),
+    vitaminAMcg: optionalNumber(input.nutrition?.vitaminAMcg),
+    vitaminB6Mg: optionalNumber(input.nutrition?.vitaminB6Mg),
+    vitaminB12Mcg: optionalNumber(input.nutrition?.vitaminB12Mcg),
+    vitaminCMg: optionalNumber(input.nutrition?.vitaminCMg),
+    vitaminDMcg: optionalNumber(input.nutrition?.vitaminDMcg),
+    vitaminEMg: optionalNumber(input.nutrition?.vitaminEMg),
+    vitaminKMcg: optionalNumber(input.nutrition?.vitaminKMcg),
     waterMl: optionalNumber(input.nutrition?.waterMl),
     weightKg: optionalNumber(input.weightKg),
     bodyFatPct: optionalNumber(input.bodyFatPct),
@@ -182,6 +347,7 @@ export function normalizeLegacyHealthSampleRow(
     localDate: localDateKey(row.start_time),
     value: row.value,
     unit: row.unit,
+    hrvMethod: hrvMethodForCanonicalType(row.metric as CanonicalType) ?? null,
     metadataJson: row.raw_json,
     importedAt: row.synced_at,
   };

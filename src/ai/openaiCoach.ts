@@ -1,4 +1,4 @@
-import type { PipelineSnapshot } from '../health/types';
+import type { DailyMetrics, PipelineSnapshot } from '../health/types';
 import { formatDuration } from '../lib/dates';
 import type { CoachHealthContext } from '../storage/trainingStore';
 
@@ -33,6 +33,7 @@ const coachInstructions = [
   'Be conservative with pain, injury, illness, fever, chest pain, fainting, unusual shortness of breath, or severe fatigue. In those cases lower intensity and suggest professional care when symptoms are serious, sharp, worsening, chest-related, or unusual.',
   'Do not diagnose, prescribe treatment, or make emergency claims. Separate what the data supports from what remains uncertain.',
   'When data is stale or missing, say so plainly and use a safer recommendation.',
+  'Never compare HRV values across different methods or sources. RMSSD and SDNN require separate baselines.',
 ].join('\n');
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -79,6 +80,21 @@ function safeDate(value?: string): string | undefined {
   return value ? value.slice(0, 10) : undefined;
 }
 
+function hrvContext(day: DailyMetrics) {
+  if (day.hrvLastNightAvg == null) {
+    return null;
+  }
+
+  return {
+    valueMs: day.hrvLastNightAvg,
+    method: day.hrvMethod,
+    canonicalType: day.hrvCanonicalType,
+    sourceApp: day.hrvSourceApp,
+    sourceKey: day.hrvSourceKey,
+    sampleCount: day.hrvSampleCount,
+  };
+}
+
 function buildCoachContext(snapshot: PipelineSnapshot, healthContext: CoachHealthContext) {
   return {
     generatedAt: new Date().toISOString(),
@@ -111,7 +127,7 @@ function buildCoachContext(snapshot: PipelineSnapshot, healthContext: CoachHealt
           sleep: snapshot.today.sleepSeconds
             ? formatDuration(snapshot.today.sleepSeconds)
             : null,
-          hrvRmssd: snapshot.today.hrvLastNightAvg,
+          hrv: hrvContext(snapshot.today),
           restingHr: snapshot.today.restingHr,
           steps: snapshot.today.steps,
           activeKcal: snapshot.today.activeKcal,
@@ -123,7 +139,7 @@ function buildCoachContext(snapshot: PipelineSnapshot, healthContext: CoachHealt
       date: day.date,
       wellnessDataStatus: day.wellnessDataStatus,
       sleep: day.sleepSeconds ? formatDuration(day.sleepSeconds) : null,
-      hrvRmssd: day.hrvLastNightAvg,
+      hrv: hrvContext(day),
       restingHr: day.restingHr,
       steps: day.steps,
       workoutCount: day.workoutCount,
@@ -161,7 +177,7 @@ function buildCoachContext(snapshot: PipelineSnapshot, healthContext: CoachHealt
         wellnessDataStatus: day.wellnessDataStatus,
         sourceCount: day.sourceCount,
         sleep: day.sleepSeconds ? formatDuration(day.sleepSeconds) : null,
-        hrvRmssd: day.hrvLastNightAvg,
+        hrv: hrvContext(day),
         restingHr: day.restingHr,
         heartRateAvgBpm: day.heartRateAvgBpm,
         steps: day.steps,

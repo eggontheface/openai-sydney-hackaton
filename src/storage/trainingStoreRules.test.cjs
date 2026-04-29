@@ -5,6 +5,7 @@ const path = require('node:path');
 const fixtures = require('./fixtures/training-rollup.fixtures.json');
 const {
   buildDailyMetricsRollup,
+  hrvBaselineFor,
   normalizeLegacyHealthSampleRow,
 } = require(path.join(process.cwd(), '.tmp/test-build/src/storage/trainingStoreRules.js'));
 
@@ -72,6 +73,8 @@ function sleepForWakeDate(date) {
 }
 
 function rollupFor(date, overrides = {}) {
+  const hrv = averageFor(date, 'hrv_rmssd');
+
   return buildDailyMetricsRollup({
     date,
     today: fixtures.today,
@@ -85,7 +88,12 @@ function rollupFor(date, overrides = {}) {
     heartRateAvgBpm: averageFor(date, 'heart_rate'),
     heartRateMinBpm: minFor(date, 'heart_rate'),
     heartRateMaxBpm: maxFor(date, 'heart_rate'),
-    hrvLastNightAvg: averageFor(date, 'hrv_rmssd'),
+    hrvLastNightAvg: hrv,
+    hrvMethod: hrv == null ? undefined : 'rmssd',
+    hrvCanonicalType: hrv == null ? undefined : 'hrv_rmssd',
+    hrvSourceApp: hrv == null ? undefined : 'Health Connect',
+    hrvSourceKey: hrv == null ? undefined : 'Health Connect',
+    hrvSampleCount: hrv == null ? undefined : 1,
     workout: workoutRollupFor(date),
     nutrition: nutritionFor(date),
     weightKg: latestFor(date, 'weight'),
@@ -102,11 +110,79 @@ test('rolls up a full fixture day without assigning sleep to its start date', ()
   assert.equal(wakeDay.hasSleep, true);
   assert.equal(wakeDay.sleepSeconds, 25200);
   assert.equal(wakeDay.distanceKm, 6.4);
+  assert.equal(wakeDay.hrvMethod, 'rmssd');
+  assert.equal(wakeDay.hrvCanonicalType, 'hrv_rmssd');
   assert.equal(wakeDay.workoutCount, 1);
   assert.equal(wakeDay.kcalIn, 2210);
+  assert.equal(wakeDay.saturatedFatG, 18);
+  assert.equal(wakeDay.potassiumMg, 3400);
+  assert.equal(wakeDay.vitaminB12Mcg, 3.1);
 
   assert.equal(sleepStartDay.hasSleep, false);
   assert.equal(sleepStartDay.sleepSeconds, undefined);
+});
+
+test('separates HRV baselines by method and source', () => {
+  const current = {
+    date: '2026-04-29',
+    hrvLastNightAvg: 42,
+    hrvMethod: 'sdnn',
+    hrvCanonicalType: 'hrv_sdnn',
+    hrvSourceKey: 'apple-watch',
+  };
+  const incompatible = hrvBaselineFor(current, [
+    current,
+    {
+      date: '2026-04-28',
+      hrvLastNightAvg: 68,
+      hrvMethod: 'rmssd',
+      hrvCanonicalType: 'hrv_rmssd',
+      hrvSourceKey: 'health-connect',
+    },
+    {
+      date: '2026-04-27',
+      hrvLastNightAvg: 65,
+      hrvMethod: 'rmssd',
+      hrvCanonicalType: 'hrv_rmssd',
+      hrvSourceKey: 'health-connect',
+    },
+  ]);
+
+  assert.equal(incompatible.status, 'method_incompatible');
+  assert.equal(incompatible.baseline, undefined);
+  assert.equal(incompatible.compatibleDays, 0);
+  assert.equal(incompatible.incompatibleDays, 2);
+
+  const compatible = hrvBaselineFor(current, [
+    current,
+    {
+      date: '2026-04-28',
+      hrvLastNightAvg: 40,
+      hrvMethod: 'sdnn',
+      hrvCanonicalType: 'hrv_sdnn',
+      hrvSourceKey: 'apple-watch',
+    },
+    {
+      date: '2026-04-27',
+      hrvLastNightAvg: 44,
+      hrvMethod: 'sdnn',
+      hrvCanonicalType: 'hrv_sdnn',
+      hrvSourceKey: 'apple-watch',
+    },
+    {
+      date: '2026-04-26',
+      hrvLastNightAvg: 70,
+      hrvMethod: 'rmssd',
+      hrvCanonicalType: 'hrv_rmssd',
+      hrvSourceKey: 'health-connect',
+    },
+  ]);
+
+  assert.equal(compatible.status, 'compatible');
+  assert.equal(compatible.baseline, 42);
+  assert.equal(compatible.delta, 0);
+  assert.equal(compatible.compatibleDays, 2);
+  assert.equal(compatible.incompatibleDays, 1);
 });
 
 test('keeps partial days partial and does not coerce missing values to zero', () => {
