@@ -1,0 +1,17 @@
+node_modules/
+
+# Build outputs
+coverage/
+dist/
+build/
+web-build/
+.tmp/
+
+# Expo / native generated outputs
+.expo/
+.expo-shared/
+android/
+ios/
+
+# Generated package manager output
+package-lock.json
