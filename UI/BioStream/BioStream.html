@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>BioStream — conversational AI coach</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,300;0,400;0,500;0,600;1,400;1,500&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #fafaf8; font-family: 'Inter', system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 99px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="tokens.jsx"></script>
+<script type="text/babel" src="primitives.jsx"></script>
+<script type="text/babel" src="chat-primitives.jsx"></script>
+<script type="text/babel" src="screens-setup.jsx"></script>
+<script type="text/babel" src="screens-main.jsx"></script>
+<script type="text/babel" src="screens-coach.jsx"></script>
+<script type="text/babel" src="screens-onboarding-chat.jsx"></script>
+<script type="text/babel" src="screens-coach-home.jsx"></script>
+
+<script type="text/babel" data-presets="env,react">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "persona": "steady",
+  "goal": "run",
+  "onboardStep": 4
+}/*EDITMODE-END*/;
+
+const tokens = window.DIRECTIONS.B; // locked to Quiet Data
+
+// ── Interactive prototype: Coach is default ──
+function PrototypeApp({ persona = 'steady', goal = 'run' }) {
+  const personaData = window.PERSONAS[persona];
+  const [tab, setTab] = React.useState('coach');
+  const [overlay, setOverlay] = React.useState(null);
+
+  return (
+    <PhoneShell tokens={tokens} bg={tokens.bg}>
+      {overlay === 'workout' && <WorkoutScreen tokens={tokens} persona={personaData} onBack={() => setOverlay(null)}/>}
+      {!overlay && tab === 'coach' && (
+        <CoachHome tokens={tokens} persona={personaData} goal={goal} onTab={setTab} active="coach" onOpenWorkout={() => setOverlay('workout')}/>
+      )}
+      {!overlay && tab === 'history' && <HistoryScreenWrapped persona={personaData} onTab={setTab}/>}
+      {!overlay && tab === 'profile' && <ProfileScreenWrapped persona={personaData} goal={goal} onTab={setTab}/>}
+    </PhoneShell>
+  );
+}
+
+// History/Profile now render their own CoachTabBar internally — pass through.
+function HistoryScreenWrapped({ persona, onTab, active = 'history' }) {
+  return <HistoryScreen tokens={tokens} persona={persona} active={active} onTab={onTab}/>;
+}
+function ProfileScreenWrapped({ persona, goal, onTab, active = 'profile' }) {
+  return <ProfileScreen tokens={tokens} persona={persona} goal={goal} active={active} onTab={onTab}/>;
+}
+
+// ── Section helper for canvas ──
+function Frame({ id, label, children, w = 396, h = 776 }) {
+  return (
+    <DCArtboard id={id} label={label} width={w} height={h}>
+      <div style={{ width: w, height: h, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', background: 'transparent' }}>
+        <PhoneShell tokens={tokens} bg={tokens.bg}>{children}</PhoneShell>
+      </div>
+    </DCArtboard>
+  );
+}
+
+function App() {
+  const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const personaData = window.PERSONAS[tweaks.persona];
+
+  return (
+    <>
+      <DesignCanvas>
+        {/* ── Cover ── */}
+        <DCSection id="cover" title="BioStream" subtitle="A conversational AI coach. The chat is the app — onboarding, daily check-ins, and 'what should I do today?' all happen in one warm, ongoing conversation. Locked to direction B (Quiet Data).">
+          <DCArtboard id="cover-art" label="The system" width={760} height={420}>
+            <div style={{ width: 760, height: 420, padding: 36, background: tokens.bg, borderRadius: 12, border: `1px solid ${tokens.line}`, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 1.6, textTransform: 'uppercase', color: tokens.muted }}>BioStream · v0.2 · conversation-first</div>
+                <div style={{ fontFamily: "'Newsreader', serif", fontSize: 56, fontWeight: 400, lineHeight: 1.0, color: tokens.ink, marginTop: 14, letterSpacing: -1.2 }}>
+                  The coach <em style={{ fontStyle: 'italic' }}>is</em> the app.
+                </div>
+                <div style={{ fontSize: 15, color: tokens.inkSoft, marginTop: 14, maxWidth: 600, lineHeight: 1.55 }}>
+                  Open the app — your coach is already there. They've read last night's sleep, this morning's HRV, and the last two weeks of training. They greet you, ask how you're landing, and tell you exactly what to do today. Onboarding is a chat. The morning is a chat. "What should I do?" is a chat.
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+                {[
+                  { l: '01', n: 'Conversational onboarding', d: 'Chat-style Q&A with tappable answer chips. No forms.' },
+                  { l: '02', n: 'Coach is the default tab',  d: 'Open the app, the coach is already mid-thought.' },
+                  { l: '03', n: 'Mixed media in chat',        d: 'Rings, sparklines, plan cards — embedded in conversation.' },
+                ].map(d => (
+                  <div key={d.l} style={{ padding: 14, borderRadius: 8, background: tokens.surface, border: `1px solid ${tokens.lineSoft}` }}>
+                    <div style={{ fontFamily: tokens.mono, fontSize: 11, color: tokens.muted, letterSpacing: 0.5 }}>{d.l}</div>
+                    <div style={{ fontFamily: tokens.serif, fontSize: 16, color: tokens.ink, marginTop: 4, fontWeight: 500 }}>{d.n}</div>
+                    <div style={{ fontSize: 12, color: tokens.muted, marginTop: 6, lineHeight: 1.5 }}>{d.d}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </DCArtboard>
+        </DCSection>
+
+        {/* ── Live prototype ── */}
+        <DCSection id="proto" title="Interactive prototype" subtitle="Coach is the default. Tap 'Open plan' to drill into today's session. Switch persona in Tweaks to see the warm voice adapt across Peak / Steady / Recover days.">
+          <DCArtboard id="proto-live" label="Live · drives off Tweaks" width={420} height={800}>
+            <div style={{ width: 420, height: 800, display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+              <PrototypeApp persona={tweaks.persona} goal={tweaks.goal}/>
+            </div>
+          </DCArtboard>
+        </DCSection>
+
+        {/* ── Conversational onboarding ── */}
+        <DCSection id="onboard" title="Conversational onboarding" subtitle="No forms. The coach interviews you — one warm question at a time, with tappable chip answers and the option to type your own.">
+          <Frame id="onb-1" label="01 · First question">
+            <ConversationalOnboarding tokens={tokens} step={1}/>
+          </Frame>
+          <Frame id="onb-2" label="02 · Specifics">
+            <ConversationalOnboarding tokens={tokens} step={2}/>
+          </Frame>
+          <Frame id="onb-3" label="03 · Timeline">
+            <ConversationalOnboarding tokens={tokens} step={3}/>
+          </Frame>
+          <Frame id="onb-4" label="04 · Calibration">
+            <ConversationalOnboarding tokens={tokens} step={4}/>
+          </Frame>
+          <Frame id="onb-perm" label="05 · Health permissions">
+            <PermissionsScreen tokens={tokens}/>
+          </Frame>
+          <Frame id="onb-key" label="06 · BYO OpenAI key">
+            <ApiKeyScreen tokens={tokens}/>
+          </Frame>
+        </DCSection>
+
+        {/* ── Coach Home (the hero) ── */}
+        <DCSection id="coach-home" title="Coach · the home tab" subtitle="What you see when you open the app each morning. Three personas show how the warm voice adapts to your actual day — peak, steady, or recovery.">
+          <Frame id="coach-peak" label="Peak readiness day">
+            <CoachHome tokens={tokens} persona={window.PERSONAS.peak} goal="run" active="coach" onTab={()=>{}}/>
+          </Frame>
+          <Frame id="coach-steady" label="Steady day">
+            <CoachHome tokens={tokens} persona={window.PERSONAS.steady} goal="run" active="coach" onTab={()=>{}}/>
+          </Frame>
+          <Frame id="coach-low" label="Low recovery day">
+            <CoachHome tokens={tokens} persona={window.PERSONAS.low} goal="run" active="coach" onTab={()=>{}}/>
+          </Frame>
+        </DCSection>
+
+        {/* ── Supporting tabs ── */}
+        <DCSection id="other" title="Supporting tabs" subtitle="Coach is primary. History and You are one tap away — for when you want to look back or adjust something.">
+          <Frame id="other-workout" label="Today's session (drilldown)">
+            <WorkoutScreen tokens={tokens} persona={personaData}/>
+          </Frame>
+          <Frame id="other-history" label="History · trends">
+            <HistoryScreenWrapped persona={personaData} onTab={()=>{}}/>
+          </Frame>
+          <Frame id="other-profile" label="You · profile + goals">
+            <ProfileScreenWrapped persona={personaData} goal={tweaks.goal} onTab={()=>{}}/>
+          </Frame>
+        </DCSection>
+
+        {/* ── Voice notes ── */}
+        <DCSection id="voice" title="Coach voice" subtitle="Warm, encouraging, never preachy. Same data, three different mornings.">
+          <DCArtboard id="voice-card" label="Same data, three days" width={760} height={420}>
+            <div style={{ width: 760, height: 420, padding: 32, background: tokens.surface, borderRadius: 12, border: `1px solid ${tokens.line}`, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
+              {[
+                { tag: 'Peak', color: tokens.positive, t: <>Morning, Dane. <em style={{ fontStyle: 'italic' }}>You slept well</em>, and your body's loving it. HRV jumped 12 ms — you're <em>primed</em>. If we've been waiting for a green light, this is it.</> },
+                { tag: 'Steady', color: tokens.cool, t: <>Morning, Dane. You're <em style={{ fontStyle: 'italic' }}>right in the pocket</em>. Solid baseline — exactly what an aerobic block looks like when it's working. Today's a tempo day.</> },
+                { tag: 'Recover', color: tokens.warm, t: <>Morning, Dane. <em style={{ fontStyle: 'italic' }}>Honest check-in:</em> your body's asking for a softer day. None of that is a problem — it's information. We listen, and we earn tomorrow.</> },
+              ].map((d, i) => (
+                <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 600, letterSpacing: 1.4, textTransform: 'uppercase', color: d.color }}>
+                    <div style={{ width: 6, height: 6, borderRadius: 99, background: d.color }}/>{d.tag}
+                  </div>
+                  <div style={{ fontFamily: tokens.serif, fontSize: 17, lineHeight: 1.45, color: tokens.ink, fontWeight: 400, letterSpacing: -0.1 }}>"{d.t}"</div>
+                </div>
+              ))}
+            </div>
+          </DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+
+      {/* Tweaks */}
+      <TweaksPanel title="Tweaks">
+        <TweakSection title="Persona (drives the conversation)">
+          <TweakRadio label="How are you landing today?" value={tweaks.persona}
+            options={[
+              { value: 'peak',   label: 'Peak' },
+              { value: 'steady', label: 'Steady' },
+              { value: 'low',    label: 'Recover' },
+            ]}
+            onChange={v => setTweak('persona', v)}/>
+        </TweakSection>
+        <TweakSection title="Goal">
+          <TweakSelect label="Primary goal" value={tweaks.goal}
+            options={[
+              { value: 'run',      label: 'Improve running' },
+              { value: 'muscle',   label: 'Build muscle' },
+              { value: 'fat',      label: 'Lose fat' },
+              { value: 'cycle',    label: 'Improve cycling' },
+              { value: 'event',    label: 'Train for event' },
+              { value: 'sleep',    label: 'Sleep & recovery' },
+              { value: 'maintain', label: 'Maintain fitness' },
+            ]}
+            onChange={v => setTweak('goal', v)}/>
+        </TweakSection>
+        <TweakSection title="Onboarding step (in canvas)">
+          <TweakRadio label="Visible step" value={String(tweaks.onboardStep)}
+            options={[
+              { value: '1', label: '1' },
+              { value: '2', label: '2' },
+              { value: '3', label: '3' },
+              { value: '4', label: '4' },
+            ]}
+            onChange={v => setTweak('onboardStep', parseInt(v))}/>
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
