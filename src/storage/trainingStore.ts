@@ -3,6 +3,7 @@ import * as Sharing from "expo-sharing";
 import * as SQLite from "expo-sqlite";
 
 import { extractRiskFlagsFromCoachRequest } from "../coach/riskFlags";
+import { buildReadinessStatus } from "../coach/readinessStatus";
 import {
   buildTrainingLoadSnapshot,
   recommendationBoundaryForTrainingLoad,
@@ -2572,16 +2573,21 @@ function deriveRecommendation(
   trainingLoad: TrainingLoadSnapshot = buildCurrentTrainingLoadSnapshot(),
 ): CoachRecommendation {
   if (!current || current.sourceCount === 0) {
+    const readinessStatus = buildReadinessStatus({
+      score: null,
+      signalsUsed: [],
+      sourceFreshness,
+    });
+
     return {
       readiness: null,
-      readinessLabel: "Connect",
-      color: "neutral",
-      title: "Sync Health Connect",
-      detail: "Import the last 7-30 days to build your baseline.",
-      reason:
-        "The coach needs sleep, HRV or resting heart rate, steps, energy, and workouts before making a useful training call.",
-      opener:
-        "Connect Health Connect and run a sync. I will turn the on-device data into a daily recovery and training view.",
+      readinessStatus,
+      readinessLabel: readinessStatus.ui.label,
+      color: readinessStatus.ui.color,
+      title: readinessStatus.ui.title,
+      detail: readinessStatus.ui.detail,
+      reason: readinessStatus.ui.reason,
+      opener: readinessStatus.ui.opener,
       strain: 0,
       strainTarget: "—",
     };
@@ -2691,11 +2697,18 @@ function deriveRecommendation(
     );
   }
 
-  if (readiness < 50) {
+  const readinessStatus = buildReadinessStatus({
+    score: readiness,
+    signalsUsed: signals,
+    sourceFreshness,
+  });
+
+  if (readinessStatus.status === "red") {
     return {
       readiness,
-      readinessLabel: "Recover",
-      color: "warm",
+      readinessStatus,
+      readinessLabel: readinessStatus.ui.label,
+      color: readinessStatus.ui.color,
       title: "Easy walk + mobility",
       detail: "30 min Z1 walk · 10 min hips and calves",
       reason: `${signals.join(", ")}. Pushing hard today would reduce the odds of stacking the next session well.`,
@@ -2705,11 +2718,12 @@ function deriveRecommendation(
     };
   }
 
-  if (readiness >= 78 && (current.workoutCount ?? 0) === 0) {
+  if (readinessStatus.status === "green" && (current.workoutCount ?? 0) === 0) {
     return {
       readiness,
-      readinessLabel: "Primed",
-      color: "positive",
+      readinessStatus,
+      readinessLabel: readinessStatus.ui.label,
+      color: readinessStatus.ui.color,
       title: "Quality run",
       detail: "10 min easy · 4 x 5 min strong · cool down",
       reason: `${signals.join(", ")}. Current recovery supports a harder aerobic stimulus.`,
@@ -2721,8 +2735,9 @@ function deriveRecommendation(
 
   return {
     readiness,
-    readinessLabel: "Ready",
-    color: "cool",
+    readinessStatus,
+    readinessLabel: readinessStatus.ui.label,
+    color: readinessStatus.ui.color,
     title: "Aerobic base",
     detail: "45 min easy run or ride · stay conversational",
     reason: `${signals.join(", ")}. This is a good day to add durable aerobic volume without forcing intensity.`,

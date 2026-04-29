@@ -1,5 +1,6 @@
 import type { PipelineSnapshot } from "../health/types";
 
+import { buildReadinessStatus } from "../coach/readinessStatus";
 import { buildTrainingLoadSnapshot } from "../coach/trainingLoad";
 import { buildPipelineExportArtifacts } from "./pipelineExport";
 
@@ -20,12 +21,18 @@ function snapshot(): PipelineSnapshot {
     trainingLoad: buildTrainingLoadSnapshot(),
     recommendation: {
       readiness: null,
+      readinessStatus: buildReadinessStatus({
+        score: null,
+        signalsUsed: [],
+        sourceFreshness: [],
+      }),
       readinessLabel: "Unknown",
-      color: "neutral",
-      title: "Connect data",
-      detail: "No local data yet.",
-      reason: "No platform data is available.",
-      opener: "Connect a health source.",
+      color: "warm",
+      title: "Readiness unknown",
+      detail: "Keep it easy until current recovery data is available.",
+      reason:
+        "There is not enough current data for a confident readiness call.",
+      opener: "Readiness is unknown, so I would keep today conservative.",
       strain: 0,
       strainTarget: "0",
     },
