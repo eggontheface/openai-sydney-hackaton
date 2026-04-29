@@ -63,6 +63,7 @@ export type SourceFreshness = {
   canonicalTypes: CanonicalType[];
   sampleCount: number;
   dayCount: number;
+  earliestLocalDate?: string;
   latestLocalDate?: string;
   lastUpdatedAt?: string;
   ageDays?: number;

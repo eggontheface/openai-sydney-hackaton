@@ -155,6 +155,7 @@ export type SyncRunDetails = {
 export type PipelineExportResult = {
   jsonFileUri: string;
   healthCheckFileUri: string;
+  llmBundleFileUri: string;
 };
 
 type HealthConnectDiagnosticRow = {
@@ -177,6 +178,7 @@ type MetricAvailabilityRow = {
 type FreshnessStatsRow = {
   sample_count: number | null;
   day_count: number | null;
+  first_date: string | null;
   latest_date: string | null;
   last_updated_at: string | null;
 };
@@ -830,6 +832,7 @@ async function freshnessStatsForSamples(
       SELECT
         COUNT(*) AS sample_count,
         COUNT(DISTINCT local_date) AS day_count,
+        MIN(local_date) AS first_date,
         MAX(local_date) AS latest_date,
         MAX(COALESCE(source_modified_at, end_at, imported_at)) AS last_updated_at
       FROM health_samples
@@ -846,6 +849,7 @@ async function freshnessStatsForSleep(
     SELECT
       COUNT(*) AS sample_count,
       COUNT(DISTINCT date_key) AS day_count,
+      MIN(date_key) AS first_date,
       MAX(date_key) AS latest_date,
       MAX(updated_at) AS last_updated_at
     FROM (
@@ -866,6 +870,7 @@ async function freshnessStatsForWorkouts(
     SELECT
       COUNT(*) AS sample_count,
       COUNT(DISTINCT date_key) AS day_count,
+      MIN(date_key) AS first_date,
       MAX(date_key) AS latest_date,
       MAX(updated_at) AS last_updated_at
     FROM (
@@ -911,6 +916,7 @@ async function freshnessStatsForNutrition(
     SELECT
       COUNT(*) AS sample_count,
       COUNT(DISTINCT date_key) AS day_count,
+      MIN(date_key) AS first_date,
       MAX(date_key) AS latest_date,
       MAX(updated_at) AS last_updated_at
     FROM (
@@ -1155,6 +1161,7 @@ async function getSourceFreshness(
     );
     const sampleCount = Number(stats?.sample_count ?? 0);
     const dayCount = Number(stats?.day_count ?? 0);
+    const earliestDate = stats?.first_date ?? undefined;
     const latestDate = stats?.latest_date ?? undefined;
     const ageDays = daysSinceLocalDate(latestDate, today);
     const missingTypes =
@@ -1197,6 +1204,7 @@ async function getSourceFreshness(
       canonicalTypes: config.canonicalTypes,
       sampleCount,
       dayCount,
+      earliestLocalDate: earliestDate,
       latestLocalDate: latestDate,
       lastUpdatedAt: stats?.last_updated_at ?? undefined,
       ageDays,
@@ -1208,11 +1216,13 @@ async function getSourceFreshness(
     SELECT
       COUNT(*) AS sample_count,
       COUNT(DISTINCT local_date) AS day_count,
+      MIN(local_date) AS first_date,
       MAX(local_date) AS latest_date,
       MAX(updated_at) AS last_updated_at
     FROM daily_check_ins
   `);
   const checkInCount = Number(checkInStats?.sample_count ?? 0);
+  const checkInEarliestDate = checkInStats?.first_date ?? undefined;
   const checkInLatestDate = checkInStats?.latest_date ?? undefined;
   const checkInAgeDays = daysSinceLocalDate(checkInLatestDate, today);
   rows.push({
@@ -1226,6 +1236,7 @@ async function getSourceFreshness(
     canonicalTypes: [],
     sampleCount: checkInCount,
     dayCount: Number(checkInStats?.day_count ?? 0),
+    earliestLocalDate: checkInEarliestDate,
     latestLocalDate: checkInLatestDate,
     lastUpdatedAt: checkInStats?.last_updated_at ?? undefined,
     ageDays: checkInAgeDays,
@@ -3385,13 +3396,21 @@ export async function exportPipelineArtifacts(): Promise<PipelineExportResult> {
     const goalProfileRow = await db.getFirstAsync<GoalProfileRow>(
       "SELECT * FROM goal_profile WHERE id = 'current' LIMIT 1",
     );
-    const exportArtifacts = buildPipelineExportArtifacts(pipelineSnapshot);
-    const exportedAt = exportArtifacts.exportedAt;
+    const exportedAt = new Date().toISOString();
+    const timestamp = Date.now();
     const goalProfile = goalProfileRow ? toGoalProfile(goalProfileRow) : null;
     const riskFlags = extractRiskFlagsFromCoachRequest({
       generated_at: exportedAt,
       goal_profile: goalProfile ?? undefined,
       daily_check_in: pipelineSnapshot.todayCheckIn ?? undefined,
+    });
+    const exportArtifacts = buildPipelineExportArtifacts(pipelineSnapshot, {
+      exportedAt,
+      timestamp,
+      llmBundle: {
+        goalProfile,
+        riskFlags,
+      },
     });
 
     const payload = {
@@ -3420,10 +3439,18 @@ export async function exportPipelineArtifacts(): Promise<PipelineExportResult> {
 
     const jsonFileUri = `${directory}${exportArtifacts.jsonFileName}`;
     const healthCheckFileUri = `${directory}${exportArtifacts.healthCheckFileName}`;
+    const llmBundleFileUri = `${directory}${exportArtifacts.llmBundleFileName}`;
     await Promise.all([
       FileSystem.writeAsStringAsync(jsonFileUri, safeJsonStringify(payload), {
         encoding: FileSystem.EncodingType.UTF8,
       }),
+      FileSystem.writeAsStringAsync(
+        llmBundleFileUri,
+        exportArtifacts.llmBundleJson,
+        {
+          encoding: FileSystem.EncodingType.UTF8,
+        },
+      ),
       FileSystem.writeAsStringAsync(
         healthCheckFileUri,
         exportArtifacts.healthCheckMarkdown,
@@ -3442,9 +3469,13 @@ export async function exportPipelineArtifacts(): Promise<PipelineExportResult> {
         mimeType: "text/markdown",
         dialogTitle: "Export BioStream health_check.md",
       });
+      await Sharing.shareAsync(llmBundleFileUri, {
+        mimeType: "application/json",
+        dialogTitle: "Export BioStream llm_bundle.json",
+      });
     }
 
-    return { jsonFileUri, healthCheckFileUri };
+    return { jsonFileUri, healthCheckFileUri, llmBundleFileUri };
   });
 }
 

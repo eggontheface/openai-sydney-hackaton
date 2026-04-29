@@ -51,6 +51,10 @@ describe("buildPipelineExportArtifacts", () => {
 
     expect(artifacts.jsonFileName).toBe("biostream-pipeline-123.json");
     expect(artifacts.healthCheckFileName).toBe("health_check-123.md");
+    expect(artifacts.llmBundleFileName).toBe("llm_bundle-123.json");
+    expect(artifacts.llmBundleJson).toContain(
+      '"schema":"biostream_llm_bundle.v1"',
+    );
     expect(artifacts.healthCheckMarkdown).toContain(
       "Generated at: 2026-04-29T05:00:00.000Z",
     );
