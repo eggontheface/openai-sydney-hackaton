@@ -157,10 +157,13 @@ function sourceDevice(metadata?: RecordMetadata): string | undefined {
     .trim();
 }
 
-function providerId(recordType: RecordType, record: { metadata?: RecordMetadata }, index: number) {
+function providerId(recordType: RecordType, record: TimedRecord) {
+  const start = recordStart(record);
+  const end = recordEnd(record);
+
   return (
     record.metadata?.id ??
-    `${recordType}:${record.metadata?.dataOrigin ?? 'unknown'}:${index}`
+    `${recordType}:${record.metadata?.dataOrigin ?? 'unknown'}:${start}:${end}`
   );
 }
 
@@ -581,7 +584,7 @@ function finalizeNutrition(records: Map<string, NutritionAccumulator>): Nutritio
   }));
 }
 
-function parseSleepSession(record: any, index: number): SleepSessionRecord {
+function parseSleepSession(record: any): SleepSessionRecord {
   const stages = Array.isArray(record.stages) ? record.stages : [];
   const timeInBedSeconds = secondsBetween(record.startTime, record.endTime);
   let sleepSeconds = stages.length ? 0 : timeInBedSeconds;
@@ -610,7 +613,7 @@ function parseSleepSession(record: any, index: number): SleepSessionRecord {
   }
 
   return {
-    sleepId: `health_connect:sleep:${providerId('SleepSession', record, index)}`,
+    sleepId: `health_connect:sleep:${providerId('SleepSession', record)}`,
     platform: 'health_connect',
     sourceApp: record.metadata?.dataOrigin,
     startAt: record.startTime,
@@ -629,11 +632,11 @@ function parseSleepSession(record: any, index: number): SleepSessionRecord {
   };
 }
 
-function parseWorkout(record: any, index: number): WorkoutRecord {
+function parseWorkout(record: any): WorkoutRecord {
   const elapsedSeconds = secondsBetween(record.startTime, record.endTime);
 
   return {
-    workoutId: `health_connect:workout:${providerId('ExerciseSession', record, index)}`,
+    workoutId: `health_connect:workout:${providerId('ExerciseSession', record)}`,
     platform: 'health_connect',
     sourceApp: record.metadata?.dataOrigin,
     startAt: record.startTime,
@@ -865,7 +868,7 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
         const metadata = anyRecord.metadata as RecordMetadata | undefined;
 
         if (config.recordType === 'ExerciseSession') {
-          const workout = parseWorkout(anyRecord, index);
+          const workout = parseWorkout(anyRecord);
           workouts.push(workout);
           samples.push(
             healthSample({
@@ -882,7 +885,7 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
         }
 
         if (config.recordType === 'SleepSession') {
-          const session = parseSleepSession(anyRecord, index);
+          const session = parseSleepSession(anyRecord);
           sleepSessions.push(session);
           samples.push(
             healthSample({
