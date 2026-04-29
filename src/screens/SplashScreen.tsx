@@ -1,9 +1,9 @@
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
-import { MessageCircle, RefreshCw } from 'lucide-react-native';
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { MessageCircle, RefreshCw } from "lucide-react-native";
 
-import { styles } from '../styles/appStyles';
-import { tokens } from '../theme/tokens';
-import { CoachAvatar } from '../ui/primitives';
+import { styles } from "../styles/appStyles";
+import { tokens } from "../theme/tokens";
+import { CoachAvatar } from "../ui/primitives";
 
 export function SplashScreen({
   busy,
@@ -27,13 +27,22 @@ export function SplashScreen({
       </View>
 
       <View style={styles.splashActions}>
-        <Pressable accessibilityRole="button" onPress={onStartOnboarding} style={({ pressed }) => [styles.splashOption, pressed && styles.pressed]}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onStartOnboarding}
+          style={({ pressed }) => [
+            styles.splashOption,
+            pressed && styles.pressed,
+          ]}
+        >
           <View style={styles.splashOptionIcon}>
-            <MessageCircle color={tokens.ink} size={20} strokeWidth={2.2} />
+            <MessageCircle color={tokens.accent} size={20} strokeWidth={2.2} />
           </View>
           <View style={styles.splashOptionCopy}>
             <Text style={styles.splashOptionTitle}>Onboarding</Text>
-            <Text style={styles.splashOptionText}>Set goals, constraints, and data preferences first.</Text>
+            <Text style={styles.splashOptionText}>
+              Set goals, constraints, and data preferences first.
+            </Text>
           </View>
         </Pressable>
 
@@ -41,14 +50,36 @@ export function SplashScreen({
           accessibilityRole="button"
           disabled={busy}
           onPress={onSyncAndStart}
-          style={({ pressed }) => [styles.splashOption, styles.splashOptionPrimary, busy && styles.disabled, pressed && !busy && styles.pressed]}
+          style={({ pressed }) => [
+            styles.splashOption,
+            styles.splashOptionPrimary,
+            busy && styles.disabled,
+            pressed && !busy && styles.pressed,
+          ]}
         >
-          <View style={[styles.splashOptionIcon, styles.splashOptionIconPrimary]}>
-            {busy ? <ActivityIndicator color={tokens.surface} size="small" /> : <RefreshCw color={tokens.surface} size={20} strokeWidth={2.2} />}
+          <View
+            style={[styles.splashOptionIcon, styles.splashOptionIconPrimary]}
+          >
+            {busy ? (
+              <ActivityIndicator color={tokens.surface} size="small" />
+            ) : (
+              <RefreshCw color={tokens.surface} size={20} strokeWidth={2.2} />
+            )}
           </View>
           <View style={styles.splashOptionCopy}>
-            <Text style={[styles.splashOptionTitle, styles.splashOptionTitlePrimary]}>Sync data & start</Text>
-            <Text style={[styles.splashOptionText, styles.splashOptionTextPrimary]}>{busy ? status : `Load data from ${sourceLabel} and open the coach.`}</Text>
+            <Text
+              style={[
+                styles.splashOptionTitle,
+                styles.splashOptionTitlePrimary,
+              ]}
+            >
+              Sync data & start
+            </Text>
+            <Text
+              style={[styles.splashOptionText, styles.splashOptionTextPrimary]}
+            >
+              {busy ? status : "Connect data, then open Coach."}
+            </Text>
           </View>
         </Pressable>
       </View>
@@ -56,7 +87,13 @@ export function SplashScreen({
   );
 }
 
-export function StartLoadingScreen({ sourceLabel, status }: { sourceLabel: string; status: string }) {
+export function StartLoadingScreen({
+  sourceLabel,
+  status,
+}: {
+  sourceLabel: string;
+  status: string;
+}) {
   return (
     <View style={styles.screen}>
       <View style={styles.topBar}>
@@ -70,9 +107,11 @@ export function StartLoadingScreen({ sourceLabel, status }: { sourceLabel: strin
       </View>
 
       <View style={styles.startLoadingContent}>
-        <ActivityIndicator color={tokens.ink} size="large" />
+        <ActivityIndicator color={tokens.accent} size="large" />
         <Text style={styles.startLoadingTitle}>Loading</Text>
-        <Text style={styles.startLoadingText}>{status || `Getting recent data from ${sourceLabel}.`}</Text>
+        <Text style={styles.startLoadingText}>
+          {status || `Getting recent data from ${sourceLabel}.`}
+        </Text>
       </View>
     </View>
   );
