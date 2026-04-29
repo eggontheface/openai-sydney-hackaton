@@ -1,26 +1,32 @@
-import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
-import type { LucideIcon } from 'lucide-react-native';
+import type { ReactNode } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import Svg, { Circle, Path } from "react-native-svg";
+import type { LucideIcon } from "lucide-react-native";
 
-import { styles } from '../styles/appStyles';
-import { tokens } from '../theme/tokens';
+import { styles } from "../styles/appStyles";
+import { tokens } from "../theme/tokens";
 
 export function AppButton({
   label,
   icon: Icon,
   onPress,
   disabled,
-  variant = 'secondary',
+  variant = "secondary",
 }: {
   label: string;
   icon: LucideIcon;
   onPress: () => void;
   disabled?: boolean;
-  variant?: 'primary' | 'secondary' | 'danger';
+  variant?: "primary" | "secondary" | "danger";
 }) {
-  const primary = variant === 'primary';
-  const danger = variant === 'danger';
+  const primary = variant === "primary";
+  const danger = variant === "danger";
 
   return (
     <Pressable
@@ -70,7 +76,9 @@ export function CoachAvatar({ size = 34 }: { size?: number }) {
           },
         ]}
       >
-        <Text style={[styles.coachAvatarText, { fontSize: size * 0.45 }]}>c</Text>
+        <Text style={[styles.coachAvatarText, { fontSize: size * 0.45 }]}>
+          c
+        </Text>
       </View>
       <View style={styles.coachOnlineDot} />
     </View>
@@ -119,7 +127,7 @@ export function Ring({
       </Svg>
       <View style={StyleSheet.absoluteFillObject}>
         <View style={styles.ringCenter}>
-          <Text style={styles.ringValue}>{value == null ? '—' : value}</Text>
+          <Text style={styles.ringValue}>{value == null ? "—" : value}</Text>
         </View>
       </View>
     </View>
@@ -138,17 +146,29 @@ export function Sparkline({ data, color }: { data: number[]; color: string }) {
     return [x, y];
   });
   const path = points
-    .map(([x, y], index) => `${index === 0 ? 'M' : 'L'}${x},${y}`)
-    .join(' ');
+    .map(([x, y], index) => `${index === 0 ? "M" : "L"}${x},${y}`)
+    .join(" ");
 
   return (
     <Svg height={height} width="100%" viewBox={`0 0 ${width} ${height}`}>
-      <Path d={path} fill="none" stroke={color} strokeLinecap="round" strokeWidth={2} />
+      <Path
+        d={path}
+        fill="none"
+        stroke={color}
+        strokeLinecap="round"
+        strokeWidth={2}
+      />
     </Svg>
   );
 }
 
-export function CoachLine({ children, first }: { children: string; first?: boolean }) {
+export function CoachLine({
+  children,
+  first,
+}: {
+  children: string;
+  first?: boolean;
+}) {
   return (
     <View style={[styles.coachLine, first && styles.coachLineFirst]}>
       {first ? <CoachAvatar size={32} /> : <View style={styles.coachSpacer} />}
@@ -179,10 +199,21 @@ export function DataCard({
   inset?: boolean;
 }) {
   return (
-    <View style={[styles.dataCard, inset && styles.dataCardInset, accent && styles.dataCardWithAccent]}>
+    <View
+      style={[
+        styles.dataCard,
+        inset && styles.dataCardInset,
+        accent && styles.dataCardWithAccent,
+      ]}
+    >
       {label ? (
         <View style={styles.dataCardHeader}>
-          <View style={[styles.dataCardAccent, { backgroundColor: accent ?? tokens.accent }]} />
+          <View
+            style={[
+              styles.dataCardAccent,
+              { backgroundColor: accent ?? tokens.accent },
+            ]}
+          />
           <SectionLabel>{label}</SectionLabel>
         </View>
       ) : null}
@@ -195,15 +226,23 @@ export function SmallMetric({
   label,
   value,
   sub,
+  loading,
 }: {
   label: string;
   value: string;
   sub?: string;
+  loading?: boolean;
 }) {
   return (
     <View style={styles.smallMetric}>
       <Text style={styles.smallMetricLabel}>{label}</Text>
-      <Text style={styles.smallMetricValue}>{value}</Text>
+      {loading ? (
+        <View style={styles.smallMetricLoading}>
+          <ActivityIndicator color={tokens.accent} size="small" />
+        </View>
+      ) : (
+        <Text style={styles.smallMetricValue}>{value}</Text>
+      )}
       {sub ? <Text style={styles.smallMetricSub}>{sub}</Text> : null}
     </View>
   );

@@ -130,6 +130,7 @@ export function CoachScreen({
     snapshot.sleepCount > 0 ||
     snapshot.nutritionDays > 0 ||
     snapshot.coverageDays > 0;
+  const loadingInitialMetrics = busy && !hasSyncedData;
   const coachGreeting = hasSyncedData
     ? `Good morning ${athleteName}. You are in a good spot to keep building toward ${goalPhrase}. I have checked the recovery picture and lined up today's work. If anything has changed since the data came in, tell me and I will adjust it.`
     : `Good morning ${athleteName}. Let's keep building toward ${goalPhrase}. I do not have enough wearable history yet, so I will keep things sensible and adjust as you give me more context.`;
@@ -212,20 +213,43 @@ export function CoachScreen({
         <DataCard accent={accent} label="Sleep & recovery">
           <View style={styles.sourceLine}>
             <Text style={styles.sourceLineText}>
-              {current?.hasSleep ? wearableLabel : "Waiting for wearable data"}
+              {loadingInitialMetrics
+                ? "Loading wearable data"
+                : current?.hasSleep
+                  ? wearableLabel
+                  : "Waiting for wearable data"}
             </Text>
-            <Text style={styles.sourceLineText}>{dataAge(lastSync)}</Text>
+            <Text style={styles.sourceLineText}>
+              {loadingInitialMetrics ? status : dataAge(lastSync)}
+            </Text>
           </View>
           <View style={styles.metricGridFull}>
-            <SmallMetric label="Sleep" value={sleep} />
+            <SmallMetric
+              label="Sleep"
+              loading={loadingInitialMetrics}
+              value={sleep}
+            />
             <SmallMetric
               label="Score"
+              loading={loadingInitialMetrics}
               value={formatNumber(recommendation.readiness ?? undefined)}
             />
-            <SmallMetric label={hrvLabel} value={hrv.replace(" ms", "")} />
-            <SmallMetric label="RHR" value={rhr.replace(" bpm", "")} />
+            <SmallMetric
+              label={hrvLabel}
+              loading={loadingInitialMetrics}
+              value={hrv.replace(" ms", "")}
+            />
+            <SmallMetric
+              label="RHR"
+              loading={loadingInitialMetrics}
+              value={rhr.replace(" bpm", "")}
+            />
           </View>
-          <Text style={styles.helpText}>{recommendation.reason}</Text>
+          <Text style={styles.helpText}>
+            {loadingInitialMetrics
+              ? `Getting recent data from ${sourceLabel}.`
+              : recommendation.reason}
+          </Text>
         </DataCard>
 
         <Pressable accessibilityRole="button" onPress={onOpenWorkout}>

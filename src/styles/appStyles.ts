@@ -512,6 +512,12 @@ export const styles = StyleSheet.create({
     letterSpacing: 0,
     marginTop: 4,
   },
+  smallMetricLoading: {
+    alignItems: "flex-start",
+    height: 31,
+    justifyContent: "center",
+    marginTop: 4,
+  },
   smallMetricSub: {
     color: tokens.muted,
     fontSize: 11,
