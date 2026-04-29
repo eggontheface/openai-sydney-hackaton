@@ -111,10 +111,21 @@ export type SyncPayload = {
   workouts: WorkoutRecord[];
   sleepSessions: SleepSessionRecord[];
   nutritionDaily: NutritionDailyRecord[];
+  diagnostics: HealthConnectReadDiagnostic[];
   warnings: string[];
 };
 
 export type SyncResult = SyncPayload;
+
+export type HealthConnectReadDiagnostic = {
+  recordType: string;
+  canonicalType: CanonicalType;
+  permission: 'granted' | 'missing';
+  readKind: 'aggregate' | 'records';
+  recordsRead: number;
+  samplesWritten: number;
+  message?: string;
+};
 
 export type MetricSummary = {
   metric: CanonicalType;
@@ -180,11 +191,21 @@ export type CoachRecommendation = {
   strainTarget: string;
 };
 
+export type MetricAvailability = {
+  canonicalType: CanonicalType;
+  sampleCount: number;
+  dayCount: number;
+  latestDate?: string;
+};
+
 export type PipelineSnapshot = {
   totalSamples: number;
   workoutCount: number;
   sleepCount: number;
   nutritionDays: number;
+  coverageDays: number;
+  metricAvailability: MetricAvailability[];
+  latestDiagnostics: HealthConnectReadDiagnostic[];
   today: DailyMetrics | null;
   history: DailyMetrics[];
   recentWorkouts: WorkoutRecord[];

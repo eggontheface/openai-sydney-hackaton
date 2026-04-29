@@ -12,6 +12,7 @@ import {
 import type {
   AggregateResultRecordType,
   Permission,
+  ReadHealthDataHistoryPermission,
   RecordResult,
   RecordType,
 } from 'react-native-health-connect';
@@ -20,6 +21,7 @@ import { localDateKey, secondsBetween } from '../lib/dates';
 import { safeJsonStringify } from '../lib/json';
 import type {
   CanonicalType,
+  HealthConnectReadDiagnostic,
   HealthSample,
   NutritionDailyRecord,
   SleepSessionRecord,
@@ -34,18 +36,21 @@ type HealthConnectRecordConfig = {
   canonicalType: CanonicalType;
 };
 
+type HealthConnectPermissionRequest = Permission | ReadHealthDataHistoryPermission;
+
 const aggregateConfigs: HealthConnectRecordConfig[] = [
   { recordType: 'Steps', canonicalType: 'steps' },
   { recordType: 'ActiveCaloriesBurned', canonicalType: 'active_energy' },
   { recordType: 'TotalCaloriesBurned', canonicalType: 'total_energy' },
   { recordType: 'Distance', canonicalType: 'distance' },
   { recordType: 'HeartRate', canonicalType: 'heart_rate' },
+  { recordType: 'RestingHeartRate', canonicalType: 'resting_heart_rate' },
+  { recordType: 'SleepSession', canonicalType: 'sleep_session' },
 ];
 
 const rawRecordConfigs: HealthConnectRecordConfig[] = [
   { recordType: 'ExerciseSession', canonicalType: 'workout' },
   { recordType: 'SleepSession', canonicalType: 'sleep_session' },
-  { recordType: 'RestingHeartRate', canonicalType: 'resting_heart_rate' },
   { recordType: 'HeartRateVariabilityRmssd', canonicalType: 'hrv_rmssd' },
   { recordType: 'Weight', canonicalType: 'weight' },
   { recordType: 'BodyFat', canonicalType: 'body_fat' },
@@ -55,10 +60,28 @@ const rawRecordConfigs: HealthConnectRecordConfig[] = [
   { recordType: 'Vo2Max', canonicalType: 'vo2max' },
 ];
 
-const permissions: Permission[] = [...aggregateConfigs, ...rawRecordConfigs].map((config) => ({
+const permissionRecordTypes = Array.from(
+  new Set([...aggregateConfigs, ...rawRecordConfigs].map((config) => config.recordType)),
+);
+
+const permissions: Permission[] = permissionRecordTypes.map((recordType) => ({
   accessType: 'read',
-  recordType: config.recordType,
+  recordType,
 }));
+
+const healthDataHistoryPermission: ReadHealthDataHistoryPermission = {
+  accessType: 'read',
+  recordType: 'ReadHealthDataHistory',
+};
+
+function needsHistoryPermission(range: SyncRange): boolean {
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  return range.startDate.getTime() < thirtyDaysAgo;
+}
+
+function permissionsForRange(range: SyncRange): HealthConnectPermissionRequest[] {
+  return needsHistoryPermission(range) ? [...permissions, healthDataHistoryPermission] : permissions;
+}
 
 const readTimeoutMs = 12000;
 const maxPagesPerType = 4;
@@ -152,7 +175,7 @@ function healthSample({
 }): HealthSample {
   const timed = record as TimedRecord;
   const resolvedStart = startAt ?? recordStart(timed);
-  const resolvedEnd = endAt ?? endAt ?? recordEnd(timed);
+  const resolvedEnd = endAt ?? recordEnd(timed);
 
   return {
     sampleId: `health_connect:${recordType}:${metadata?.id ?? index}:${resolvedStart}`,
@@ -496,7 +519,7 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
     throw new Error('Health Connect could not be initialized.');
   }
 
-  const granted = await requestPermission(permissions);
+  const granted = await requestPermission(permissionsForRange(range));
   const grantedKeys = new Set(
     granted.map((permission) => `${permission.accessType}:${permission.recordType}`),
   );
@@ -511,9 +534,58 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
   const warnings = missing.length
     ? [`Missing permissions: ${missing.map((permission) => permission.recordType).join(', ')}`]
     : [];
+  function permissionState(recordType: RecordType): HealthConnectReadDiagnostic['permission'] {
+    return grantedKeys.has(`read:${recordType}`) ? 'granted' : 'missing';
+  }
+
+  const diagnostics: HealthConnectReadDiagnostic[] = [
+    ...aggregateConfigs.map((config) => ({
+      recordType: config.recordType,
+      canonicalType: config.canonicalType,
+      permission: permissionState(config.recordType),
+      readKind: 'aggregate' as const,
+      recordsRead: 0,
+      samplesWritten: 0,
+    })),
+    ...rawRecordConfigs.map((config) => ({
+      recordType: config.recordType,
+      canonicalType: config.canonicalType,
+      permission: permissionState(config.recordType),
+      readKind: 'records' as const,
+      recordsRead: 0,
+      samplesWritten: 0,
+    })),
+  ];
+
+  function updateDiagnostic(
+    config: HealthConnectRecordConfig,
+    readKind: HealthConnectReadDiagnostic['readKind'],
+    values: Partial<Pick<HealthConnectReadDiagnostic, 'recordsRead' | 'samplesWritten' | 'message'>>,
+  ) {
+    const diagnostic = diagnostics.find(
+      (item) => item.recordType === config.recordType && item.readKind === readKind,
+    );
+    if (!diagnostic) {
+      return;
+    }
+
+    Object.assign(diagnostic, values);
+  }
+
+  function hasReadPermission(recordType: RecordType): boolean {
+    return grantedKeys.has(`read:${recordType}`);
+  }
 
   for (const config of aggregateConfigs) {
+    if (!hasReadPermission(config.recordType)) {
+      updateDiagnostic(config, 'aggregate', {
+        message: 'Permission missing; read skipped.',
+      });
+      continue;
+    }
+
     try {
+      let samplesWritten = 0;
       const groups = await readDailyAggregates(
         config.recordType as AggregateResultRecordType,
         range,
@@ -543,6 +615,18 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
           if (!value || !result.MEASUREMENTS_COUNT) {
             return;
           }
+        } else if (config.recordType === 'RestingHeartRate') {
+          value = Number(result.BPM_AVG ?? 0);
+          unit = 'bpm';
+          if (!value) {
+            return;
+          }
+        } else if (config.recordType === 'SleepSession') {
+          value = Number(result.SLEEP_DURATION_TOTAL ?? 0);
+          unit = 's';
+          if (!value) {
+            return;
+          }
         }
 
         samples.push({
@@ -558,16 +642,38 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
           unit,
           metadataJson: safeJsonStringify({ recordType: config.recordType, group }),
         });
+        samplesWritten += 1;
+      });
+
+      updateDiagnostic(config, 'aggregate', {
+        recordsRead: groups.length,
+        samplesWritten,
+        message:
+          groups.length && samplesWritten
+            ? undefined
+            : 'Permission granted, but no aggregate data returned in range.',
       });
     } catch (error) {
+      const message = String(error instanceof Error ? error.message : error);
+      updateDiagnostic(config, 'aggregate', {
+        message,
+      });
       warnings.push(
-        `${config.canonicalType}: ${String(error instanceof Error ? error.message : error)}`,
+        `${config.canonicalType}: ${message}`,
       );
     }
   }
 
   for (const config of rawRecordConfigs) {
+    if (!hasReadPermission(config.recordType)) {
+      updateDiagnostic(config, 'records', {
+        message: 'Permission missing; read skipped.',
+      });
+      continue;
+    }
+
     try {
+      const sampleStartCount = samples.length;
       const records = await readAllRecords(config.recordType, range);
 
       records.forEach((record, index) => {
@@ -604,21 +710,6 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
               unit: 's',
               startAt: session.startAt,
               endAt: session.endAt,
-              metadata,
-            }),
-          );
-          return;
-        }
-
-        if (config.recordType === 'RestingHeartRate') {
-          samples.push(
-            healthSample({
-              recordType: config.recordType,
-              canonicalType: 'resting_heart_rate',
-              record: anyRecord,
-              index,
-              value: Number(anyRecord.beatsPerMinute),
-              unit: 'bpm',
               metadata,
             }),
           );
@@ -731,9 +822,21 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
           );
         }
       });
+      const samplesWritten = samples.length - sampleStartCount;
+      updateDiagnostic(config, 'records', {
+        recordsRead: records.length,
+        samplesWritten,
+        message: records.length
+          ? undefined
+          : 'Permission granted, but no records returned in range.',
+      });
     } catch (error) {
+      const message = String(error instanceof Error ? error.message : error);
+      updateDiagnostic(config, 'records', {
+        message,
+      });
       warnings.push(
-        `${config.canonicalType}: ${String(error instanceof Error ? error.message : error)}`,
+        `${config.canonicalType}: ${message}`,
       );
     }
   }
@@ -744,6 +847,7 @@ export async function syncHealthConnect(range: SyncRange): Promise<SyncResult> {
     workouts,
     sleepSessions,
     nutritionDaily: finalizeNutrition(nutrition),
+    diagnostics,
     warnings,
   };
 }

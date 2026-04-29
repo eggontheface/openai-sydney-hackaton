@@ -9,6 +9,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
@@ -46,6 +47,8 @@ import {
 import type {
   CanonicalType,
   DailyMetrics,
+  HealthConnectReadDiagnostic,
+  MetricAvailability,
   PipelineSnapshot,
   WorkoutRecord,
 } from './src/health/types';
@@ -57,6 +60,13 @@ import {
   makeSyncRange,
 } from './src/lib/dates';
 import {
+  clearOpenAiApiKey,
+  loadAppSettings,
+  saveAppSettings,
+  saveOpenAiApiKey,
+} from './src/storage/appSettings';
+import type { AppSettings } from './src/storage/appSettings';
+import {
   clearPipeline,
   exportPipelineJson,
   getLastSyncRun,
@@ -66,7 +76,13 @@ import {
   upsertSyncPayload,
 } from './src/storage/trainingStore';
 
-const ranges = [7, 30];
+const ranges = [7, 30, 365];
+const baselineRangeDays = 365;
+
+const emptyAppSettings: AppSettings = {
+  hasOpenAiApiKey: false,
+  defaultSyncRangeDays: baselineRangeDays,
+};
 
 const tokens = {
   bg: '#eef2ee',
@@ -92,6 +108,9 @@ const emptySnapshot: PipelineSnapshot = {
   workoutCount: 0,
   sleepCount: 0,
   nutritionDays: 0,
+  coverageDays: 0,
+  metricAvailability: [],
+  latestDiagnostics: [],
   today: null,
   history: [],
   recentWorkouts: [],
@@ -110,7 +129,93 @@ const emptySnapshot: PipelineSnapshot = {
 };
 
 type LastSync = Awaited<ReturnType<typeof getLastSyncRun>>;
-type Tab = 'coach' | 'history' | 'you';
+type Tab = 'coach' | 'analytics' | 'history' | 'you';
+
+type MetricStatus = 'live' | 'permission' | 'empty' | 'unchecked';
+
+type AnalyticsMetricConfig = {
+  id: string;
+  title: string;
+  detail: string;
+  types: CanonicalType[];
+  icon: LucideIcon;
+  gap: string;
+};
+
+const analyticsMetrics: AnalyticsMetricConfig[] = [
+  {
+    id: 'sleep',
+    title: 'Sleep',
+    detail: 'Duration and stages',
+    types: ['sleep_session'],
+    icon: Moon,
+    gap: 'Grant Sleep access or connect a source that writes sleep sessions.',
+  },
+  {
+    id: 'hrv',
+    title: 'HRV',
+    detail: 'RMSSD recovery signal',
+    types: ['hrv_rmssd'],
+    icon: HeartPulse,
+    gap: 'Connect a source that writes HRV RMSSD to Health Connect.',
+  },
+  {
+    id: 'rhr',
+    title: 'Resting HR',
+    detail: 'Daily resting heart rate',
+    types: ['resting_heart_rate'],
+    icon: HeartPulse,
+    gap: 'Grant Resting heart rate access or connect a source that writes RHR.',
+  },
+  {
+    id: 'heart-rate',
+    title: 'Heart rate',
+    detail: 'Daily average and range',
+    types: ['heart_rate'],
+    icon: HeartPulse,
+    gap: 'Grant Heart rate access or connect a wearable HR source.',
+  },
+  {
+    id: 'workouts',
+    title: 'Workouts',
+    detail: 'Deduped sessions',
+    types: ['workout'],
+    icon: Activity,
+    gap: 'Grant Exercise access or connect Garmin, Strava, or another workout source.',
+  },
+  {
+    id: 'activity',
+    title: 'Daily activity',
+    detail: 'Steps, energy, distance',
+    types: ['steps', 'active_energy', 'total_energy', 'distance'],
+    icon: Zap,
+    gap: 'Grant activity permissions so steps, calories, and distance can sync.',
+  },
+  {
+    id: 'nutrition',
+    title: 'Nutrition',
+    detail: 'Calories, macros, hydration',
+    types: ['nutrition', 'hydration'],
+    icon: Database,
+    gap: 'Connect a nutrition or hydration source that writes to Health Connect.',
+  },
+  {
+    id: 'body',
+    title: 'Body composition',
+    detail: 'Weight, fat, lean mass',
+    types: ['weight', 'body_fat', 'lean_body_mass'],
+    icon: ChartColumn,
+    gap: 'Connect a scale or body composition source.',
+  },
+  {
+    id: 'vo2',
+    title: 'VO2 max',
+    detail: 'Aerobic fitness estimate',
+    types: ['vo2max'],
+    icon: Route,
+    gap: 'Connect a source that writes VO2 max estimates.',
+  },
+];
 
 function toneColor(tone: PipelineSnapshot['recommendation']['color']) {
   if (tone === 'positive') return tokens.positive;
@@ -590,6 +695,177 @@ function HistoryScreen({ snapshot }: { snapshot: PipelineSnapshot }) {
   );
 }
 
+function availabilityForTypes(
+  availability: MetricAvailability[],
+  types: CanonicalType[],
+): MetricAvailability {
+  const rows = availability.filter((row) => types.includes(row.canonicalType));
+  const latestDates = rows
+    .map((row) => row.latestDate)
+    .filter((date): date is string => Boolean(date))
+    .sort();
+
+  return {
+    canonicalType: types[0],
+    sampleCount: rows.reduce((sum, row) => sum + row.sampleCount, 0),
+    dayCount: Math.max(0, ...rows.map((row) => row.dayCount)),
+    latestDate: latestDates[latestDates.length - 1],
+  };
+}
+
+function diagnosticsForTypes(
+  diagnostics: HealthConnectReadDiagnostic[],
+  types: CanonicalType[],
+): HealthConnectReadDiagnostic[] {
+  return diagnostics.filter((diagnostic) => types.includes(diagnostic.canonicalType));
+}
+
+function metricStatus(
+  availability: MetricAvailability,
+  diagnostics: HealthConnectReadDiagnostic[],
+): MetricStatus {
+  if (availability.sampleCount > 0) {
+    return 'live';
+  }
+  if (diagnostics.some((diagnostic) => diagnostic.permission === 'missing')) {
+    return 'permission';
+  }
+  if (diagnostics.some((diagnostic) => diagnostic.permission === 'granted')) {
+    return 'empty';
+  }
+  return 'unchecked';
+}
+
+function statusLabel(status: MetricStatus): string {
+  if (status === 'live') return 'Live';
+  if (status === 'permission') return 'Permission';
+  if (status === 'empty') return 'No data';
+  return 'Not checked';
+}
+
+function scoreBadgeStyle(status: MetricStatus) {
+  if (status === 'live') return styles.scoreBadge_live;
+  if (status === 'permission') return styles.scoreBadge_permission;
+  if (status === 'empty') return styles.scoreBadge_empty;
+  return styles.scoreBadge_unchecked;
+}
+
+function statusDetail(
+  config: AnalyticsMetricConfig,
+  availability: MetricAvailability,
+  diagnostics: HealthConnectReadDiagnostic[],
+): string {
+  if (availability.sampleCount > 0) {
+    const days = availability.dayCount === 1 ? '1 day' : `${availability.dayCount} days`;
+    const latest = availability.latestDate ? ` · latest ${formatDateKey(availability.latestDate)}` : '';
+    return `${formatNumber(availability.sampleCount)} records · ${days}${latest}`;
+  }
+
+  const message = diagnostics.find((diagnostic) => diagnostic.message)?.message;
+  if (message) {
+    return message;
+  }
+
+  return config.gap;
+}
+
+function ScoreboardRow({
+  config,
+  snapshot,
+}: {
+  config: AnalyticsMetricConfig;
+  snapshot: PipelineSnapshot;
+}) {
+  const availability = availabilityForTypes(snapshot.metricAvailability, config.types);
+  const diagnostics = diagnosticsForTypes(snapshot.latestDiagnostics, config.types);
+  const status = metricStatus(availability, diagnostics);
+  const coverageRatio = snapshot.coverageDays
+    ? Math.min(1, availability.dayCount / snapshot.coverageDays)
+    : 0;
+  const Icon = config.icon;
+
+  return (
+    <View style={styles.scoreRow}>
+      <View style={styles.scoreIcon}>
+        <Icon color={tokens.inkSoft} size={18} strokeWidth={2} />
+      </View>
+      <View style={styles.scoreCopy}>
+        <View style={styles.scoreTitleLine}>
+          <Text style={styles.scoreTitle}>{config.title}</Text>
+          <Text style={[styles.scoreBadge, scoreBadgeStyle(status)]}>
+            {statusLabel(status)}
+          </Text>
+        </View>
+        <Text style={styles.scoreMeta}>{config.detail}</Text>
+        <View style={styles.scoreTrack}>
+          <View style={[styles.scoreFill, { width: `${Math.round(coverageRatio * 100)}%` }]} />
+        </View>
+        <Text style={styles.scoreDetail}>{statusDetail(config, availability, diagnostics)}</Text>
+      </View>
+    </View>
+  );
+}
+
+function AnalyticsScreen({ snapshot, lastSync }: { snapshot: PipelineSnapshot; lastSync: LastSync }) {
+  const scoredMetrics = analyticsMetrics.map((config) => {
+    const availability = availabilityForTypes(snapshot.metricAvailability, config.types);
+    const diagnostics = diagnosticsForTypes(snapshot.latestDiagnostics, config.types);
+    return {
+      config,
+      status: metricStatus(availability, diagnostics),
+    };
+  });
+  const liveCount = scoredMetrics.filter((metric) => metric.status === 'live').length;
+  const gapCount = scoredMetrics.filter((metric) => metric.status !== 'live').length;
+  const topGaps = scoredMetrics.filter((metric) => metric.status !== 'live').slice(0, 3);
+
+  return (
+    <View style={styles.screen}>
+      <View style={styles.pageHeader}>
+        <Text style={styles.pageEyebrow}>Pipeline scoreboard</Text>
+        <Text style={styles.pageTitle}>Analytics</Text>
+      </View>
+      <ScrollView contentContainerStyle={styles.pageContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.summaryGrid}>
+          <SmallMetric label="Coverage days" value={formatNumber(snapshot.coverageDays)} />
+          <SmallMetric label="Live metrics" value={`${liveCount}/${analyticsMetrics.length}`} />
+          <SmallMetric label="Open gaps" value={formatNumber(gapCount)} />
+          <SmallMetric label="Raw samples" value={formatNumber(snapshot.totalSamples)} />
+        </View>
+
+        <SectionLabel>Data availability</SectionLabel>
+        <View style={styles.scoreList}>
+          {analyticsMetrics.map((config) => (
+            <ScoreboardRow config={config} key={config.id} snapshot={snapshot} />
+          ))}
+        </View>
+
+        <SectionLabel>Gaps to close</SectionLabel>
+        <View style={styles.gapList}>
+          {topGaps.length ? (
+            topGaps.map(({ config }) => (
+              <View key={config.id} style={styles.gapRow}>
+                <Text style={styles.gapTitle}>{config.title}</Text>
+                <Text style={styles.gapDetail}>{config.gap}</Text>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.emptyText}>Core metrics are available for the current dataset.</Text>
+          )}
+        </View>
+
+        <View style={styles.privacyCard}>
+          <Database color={tokens.muted} size={16} strokeWidth={2} />
+          <Text style={styles.privacyText}>
+            Scores reflect local records already imported into the on-device SQLite pipeline.
+            {` ${dataAge(lastSync)}.`}
+          </Text>
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
 function PermissionRow({
   icon: Icon,
   title,
@@ -617,28 +893,136 @@ function PermissionRow({
   );
 }
 
+function diagnosticTitle(diagnostic: HealthConnectReadDiagnostic): string {
+  const kind = diagnostic.readKind === 'aggregate' ? 'daily' : 'records';
+  return `${metricLabel(diagnostic.canonicalType)} · ${kind}`;
+}
+
+function diagnosticDetail(diagnostic: HealthConnectReadDiagnostic): string {
+  const permission =
+    diagnostic.permission === 'granted' ? 'Permission granted' : 'Permission missing';
+  const counts = `${diagnostic.recordsRead} read · ${diagnostic.samplesWritten} saved`;
+  return diagnostic.message ? `${permission} · ${counts} · ${diagnostic.message}` : `${permission} · ${counts}`;
+}
+
+function DiagnosticRow({ diagnostic }: { diagnostic: HealthConnectReadDiagnostic }) {
+  const active = diagnostic.permission === 'granted' && diagnostic.samplesWritten > 0;
+
+  return (
+    <View style={styles.diagnosticRow}>
+      <View style={[styles.diagnosticDot, active && styles.diagnosticDotActive]} />
+      <View style={styles.diagnosticCopy}>
+        <Text style={styles.diagnosticTitle}>{diagnosticTitle(diagnostic)}</Text>
+        <Text style={styles.diagnosticDetail}>{diagnosticDetail(diagnostic)}</Text>
+      </View>
+    </View>
+  );
+}
+
+function hasReadPermissionFor(
+  diagnostics: HealthConnectReadDiagnostic[],
+  types: CanonicalType[],
+): boolean {
+  return diagnostics.some(
+    (diagnostic) =>
+      types.includes(diagnostic.canonicalType) && diagnostic.permission === 'granted',
+  );
+}
+
+function hasDiagnosticSamples(
+  diagnostics: HealthConnectReadDiagnostic[],
+  types: CanonicalType[],
+): boolean {
+  return diagnostics.some(
+    (diagnostic) =>
+      types.includes(diagnostic.canonicalType) && diagnostic.samplesWritten > 0,
+  );
+}
+
 function SourceScreen({
   snapshot,
   lastSync,
+  appSettings,
+  apiKeyDraft,
+  settingsBusy,
   busy,
   status,
   rangeDays,
   setRangeDays,
+  setApiKeyDraft,
   onSync,
   onExport,
   onClear,
+  onSaveApiKey,
+  onClearApiKey,
+  onSetDefaultRange,
 }: {
   snapshot: PipelineSnapshot;
   lastSync: LastSync;
+  appSettings: AppSettings;
+  apiKeyDraft: string;
+  settingsBusy: boolean;
   busy: boolean;
   status: string;
   rangeDays: number;
   setRangeDays: (value: number) => void;
+  setApiKeyDraft: (value: string) => void;
   onSync: () => void;
   onExport: () => void;
   onClear: () => void;
+  onSaveApiKey: () => void;
+  onClearApiKey: () => void;
+  onSetDefaultRange: (value: number) => void;
 }) {
   const sourceLabel = currentHealthProviderLabel();
+  const diagnosticFocus: CanonicalType[] = [
+    'sleep_session',
+    'resting_heart_rate',
+    'hrv_rmssd',
+    'heart_rate',
+  ];
+  const focusedDiagnostics = snapshot.latestDiagnostics.filter((diagnostic) =>
+    diagnosticFocus.includes(diagnostic.canonicalType),
+  );
+  const hasPermission = (types: CanonicalType[]) =>
+    hasReadPermissionFor(snapshot.latestDiagnostics, types);
+  const hasSamples = (types: CanonicalType[]) =>
+    hasDiagnosticSamples(snapshot.latestDiagnostics, types);
+  const hasHistory = (predicate: (day: DailyMetrics) => boolean) =>
+    snapshot.history.some(predicate);
+  const hasSleepSignal =
+    snapshot.sleepCount > 0 ||
+    hasHistory((day) => day.sleepSeconds != null) ||
+    hasSamples(['sleep_session']) ||
+    hasPermission(['sleep_session']);
+  const hasVitalsSignal =
+    hasHistory(
+      (day) =>
+        day.heartRateAvgBpm != null ||
+        day.restingHr != null ||
+        day.hrvLastNightAvg != null ||
+        day.vo2max != null,
+    ) ||
+    hasSamples(['heart_rate', 'resting_heart_rate', 'hrv_rmssd', 'vo2max']) ||
+    hasPermission(['heart_rate', 'resting_heart_rate', 'hrv_rmssd', 'vo2max']);
+  const hasWorkoutSignal = snapshot.workoutCount > 0 || hasPermission(['workout']);
+  const hasActivitySignal =
+    hasHistory((day) => day.hasSteps || day.hasEnergy || day.distanceKm != null) ||
+    hasSamples(['steps', 'active_energy', 'total_energy', 'distance']) ||
+    hasPermission(['steps', 'active_energy', 'total_energy', 'distance']);
+  const hasNutritionSignal =
+    snapshot.nutritionDays > 0 ||
+    hasSamples(['nutrition', 'hydration']) ||
+    hasPermission(['nutrition', 'hydration']);
+  const hasBodySignal =
+    hasHistory(
+      (day) =>
+        day.weightKg != null ||
+        day.bodyFatPct != null ||
+        day.leanBodyMassKg != null,
+    ) ||
+    hasSamples(['weight', 'body_fat', 'lean_body_mass']) ||
+    hasPermission(['weight', 'body_fat', 'lean_body_mass']);
 
   return (
     <View style={styles.screen}>
@@ -706,7 +1090,7 @@ function SourceScreen({
             <AppButton
               disabled={busy}
               icon={Settings}
-              label="Settings"
+              label="Permissions"
               onPress={() => void openAndroidHealthSettings()}
             />
           ) : null}
@@ -719,44 +1103,130 @@ function SourceScreen({
           />
         </View>
 
+        <SectionLabel>Local app settings</SectionLabel>
+        <View style={styles.settingsCard}>
+          <View style={styles.settingsHeader}>
+            <View style={styles.settingsIcon}>
+              <Lock color={tokens.accent} size={18} strokeWidth={2} />
+            </View>
+            <View style={styles.settingsCopy}>
+              <Text style={styles.settingsTitle}>OpenAI API key</Text>
+              <Text style={styles.settingsMeta}>
+                {appSettings.hasOpenAiApiKey ? 'Saved on this device' : 'Not saved'}
+              </Text>
+            </View>
+          </View>
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            onChangeText={setApiKeyDraft}
+            placeholder={appSettings.hasOpenAiApiKey ? 'Replace saved key' : 'sk-...'}
+            placeholderTextColor={tokens.muted}
+            secureTextEntry
+            style={styles.apiKeyInput}
+            value={apiKeyDraft}
+          />
+          <View style={styles.actionsRow}>
+            <AppButton
+              disabled={settingsBusy || !apiKeyDraft.trim()}
+              icon={Check}
+              label={appSettings.hasOpenAiApiKey ? 'Replace' : 'Save'}
+              onPress={onSaveApiKey}
+            />
+            <AppButton
+              disabled={settingsBusy || !appSettings.hasOpenAiApiKey}
+              icon={Trash2}
+              label="Clear key"
+              onPress={onClearApiKey}
+              variant="danger"
+            />
+          </View>
+
+          <View style={styles.settingDivider} />
+          <View style={styles.settingRow}>
+            <View style={styles.settingsCopy}>
+              <Text style={styles.settingsTitle}>Default sync range</Text>
+              <Text style={styles.settingsMeta}>{appSettings.defaultSyncRangeDays} days</Text>
+            </View>
+            <View style={styles.settingSegments}>
+              {ranges.map((days) => (
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={settingsBusy}
+                  key={days}
+                  onPress={() => onSetDefaultRange(days)}
+                  style={[
+                    styles.settingSegment,
+                    appSettings.defaultSyncRangeDays === days && styles.settingSegmentActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.settingSegmentText,
+                      appSettings.defaultSyncRangeDays === days &&
+                        styles.settingSegmentTextActive,
+                    ]}
+                  >
+                    {days}d
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </View>
+
         <SectionLabel>Schema coverage</SectionLabel>
         <View style={styles.permissionList}>
           <PermissionRow
-            active={snapshot.sleepCount > 0}
+            active={hasSleepSignal}
             detail="Sleep sessions and stages"
             icon={Moon}
             title="Sleep"
           />
           <PermissionRow
-            active={snapshot.totalSamples > 0}
+            active={hasVitalsSignal}
             detail="HR, HRV, resting HR, VO2 max"
             icon={HeartPulse}
             title="Vitals"
           />
           <PermissionRow
-            active={snapshot.workoutCount > 0}
+            active={hasWorkoutSignal}
             detail="Sessions, duration, sport buckets"
             icon={Activity}
             title="Workouts"
           />
           <PermissionRow
-            active={Boolean(snapshot.today?.hasSteps || snapshot.today?.hasEnergy)}
+            active={hasActivitySignal}
             detail="Steps, energy, distance"
             icon={Zap}
             title="Daily activity"
           />
           <PermissionRow
-            active={snapshot.nutritionDays > 0}
+            active={hasNutritionSignal}
             detail="Calories, macros, hydration"
             icon={Database}
             title="Nutrition"
           />
           <PermissionRow
-            active={Boolean(snapshot.today?.weightKg || snapshot.today?.bodyFatPct)}
+            active={hasBodySignal}
             detail="Weight, body fat, lean mass"
             icon={ChartColumn}
             title="Body composition"
           />
+        </View>
+
+        <SectionLabel>Latest Health Connect read</SectionLabel>
+        <View style={styles.diagnosticList}>
+          {focusedDiagnostics.length ? (
+            focusedDiagnostics.map((diagnostic) => (
+              <DiagnosticRow
+                diagnostic={diagnostic}
+                key={`${diagnostic.recordType}:${diagnostic.readKind}`}
+              />
+            ))
+          ) : (
+            <Text style={styles.emptyText}>Run a sync to see sleep and vitals read results.</Text>
+          )}
         </View>
 
         <View style={styles.privacyCard}>
@@ -775,6 +1245,7 @@ function SourceScreen({
 function TabBar({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {
   const tabs: { id: Tab; label: string; icon: LucideIcon }[] = [
     { id: 'coach', label: 'Coach', icon: Sparkles },
+    { id: 'analytics', label: 'Analytics', icon: ChartColumn },
     { id: 'history', label: 'History', icon: History },
     { id: 'you', label: 'You', icon: User },
   ];
@@ -809,10 +1280,13 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (tab: Tab) => voi
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('coach');
-  const [rangeDays, setRangeDays] = useState(7);
+  const [rangeDays, setRangeDays] = useState(baselineRangeDays);
   const [snapshot, setSnapshot] = useState<PipelineSnapshot>(emptySnapshot);
   const [lastSync, setLastSync] = useState<LastSync>(null);
+  const [appSettings, setAppSettings] = useState<AppSettings>(emptyAppSettings);
+  const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const [settingsBusy, setSettingsBusy] = useState(false);
   const [status, setStatus] = useState('Ready');
   const [warnings, setWarnings] = useState<string[]>([]);
 
@@ -830,9 +1304,56 @@ export default function App() {
 
   useEffect(() => {
     void initTrainingStore()
-      .then(refreshStore)
+      .then(async () => {
+        const nextSettings = await loadAppSettings();
+        setAppSettings(nextSettings);
+        setRangeDays(nextSettings.defaultSyncRangeDays);
+        await refreshStore();
+      })
       .catch((error) => setStatus(String(error instanceof Error ? error.message : error)));
   }, []);
+
+  async function saveApiKey() {
+    setSettingsBusy(true);
+    try {
+      const nextSettings = await saveOpenAiApiKey(apiKeyDraft);
+      setAppSettings(nextSettings);
+      setApiKeyDraft('');
+      setStatus('OpenAI API key saved locally');
+    } catch (error) {
+      setStatus(String(error instanceof Error ? error.message : error));
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+
+  async function removeApiKey() {
+    setSettingsBusy(true);
+    try {
+      const nextSettings = await clearOpenAiApiKey();
+      setAppSettings(nextSettings);
+      setApiKeyDraft('');
+      setStatus('OpenAI API key cleared');
+    } catch (error) {
+      setStatus(String(error instanceof Error ? error.message : error));
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+
+  async function setDefaultSyncRange(days: number) {
+    setSettingsBusy(true);
+    try {
+      const nextSettings = await saveAppSettings({ defaultSyncRangeDays: days });
+      setAppSettings(nextSettings);
+      setRangeDays(nextSettings.defaultSyncRangeDays);
+      setStatus(`Default sync range set to ${nextSettings.defaultSyncRangeDays}d`);
+    } catch (error) {
+      setStatus(String(error instanceof Error ? error.message : error));
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
 
   async function runSync() {
     if (!canSync) {
@@ -906,16 +1427,26 @@ export default function App() {
             warnings={warnings}
           />
         ) : null}
+        {activeTab === 'analytics' ? (
+          <AnalyticsScreen lastSync={lastSync} snapshot={snapshot} />
+        ) : null}
         {activeTab === 'history' ? <HistoryScreen snapshot={snapshot} /> : null}
         {activeTab === 'you' ? (
           <SourceScreen
+            apiKeyDraft={apiKeyDraft}
+            appSettings={appSettings}
             busy={busy}
             lastSync={lastSync}
             onClear={confirmClear}
+            onClearApiKey={removeApiKey}
             onExport={runExport}
+            onSaveApiKey={saveApiKey}
+            onSetDefaultRange={setDefaultSyncRange}
             onSync={runSync}
             rangeDays={rangeDays}
+            setApiKeyDraft={setApiKeyDraft}
             setRangeDays={setRangeDays}
+            settingsBusy={settingsBusy}
             snapshot={snapshot}
             status={status}
           />
@@ -1467,6 +1998,206 @@ const styles = StyleSheet.create({
   pressed: {
     opacity: 0.78,
   },
+  scoreList: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  scoreRow: {
+    alignItems: 'flex-start',
+    borderBottomColor: tokens.lineSoft,
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 92,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  scoreIcon: {
+    alignItems: 'center',
+    backgroundColor: tokens.surfaceAlt,
+    borderRadius: 8,
+    height: 38,
+    justifyContent: 'center',
+    width: 38,
+  },
+  scoreCopy: {
+    flex: 1,
+    gap: 5,
+  },
+  scoreTitleLine: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'space-between',
+  },
+  scoreTitle: {
+    color: tokens.ink,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  scoreBadge: {
+    borderRadius: 6,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0,
+    overflow: 'hidden',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    textTransform: 'uppercase',
+  },
+  scoreBadge_live: {
+    backgroundColor: tokens.accentSoft,
+    color: tokens.accentDeep,
+  },
+  scoreBadge_permission: {
+    backgroundColor: '#fff4f2',
+    color: tokens.danger,
+  },
+  scoreBadge_empty: {
+    backgroundColor: '#fff7e7',
+    color: '#8a5a00',
+  },
+  scoreBadge_unchecked: {
+    backgroundColor: tokens.surfaceAlt,
+    color: tokens.muted,
+  },
+  scoreMeta: {
+    color: tokens.muted,
+    fontSize: 12,
+    letterSpacing: 0,
+  },
+  scoreTrack: {
+    backgroundColor: tokens.lineSoft,
+    borderRadius: 4,
+    height: 7,
+    overflow: 'hidden',
+  },
+  scoreFill: {
+    backgroundColor: tokens.accent,
+    borderRadius: 4,
+    height: 7,
+  },
+  scoreDetail: {
+    color: tokens.inkSoft,
+    fontSize: 11,
+    letterSpacing: 0,
+    lineHeight: 16,
+  },
+  gapList: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  gapRow: {
+    borderBottomColor: tokens.lineSoft,
+    borderBottomWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  gapTitle: {
+    color: tokens.ink,
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  gapDetail: {
+    color: tokens.muted,
+    fontSize: 12,
+    letterSpacing: 0,
+    lineHeight: 17,
+    marginTop: 3,
+  },
+  settingsCard: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 12,
+    padding: 14,
+  },
+  settingsHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  settingsIcon: {
+    alignItems: 'center',
+    backgroundColor: tokens.accentSoft,
+    borderRadius: 8,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  settingsCopy: {
+    flex: 1,
+  },
+  settingsTitle: {
+    color: tokens.ink,
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  settingsMeta: {
+    color: tokens.muted,
+    fontSize: 12,
+    letterSpacing: 0,
+    marginTop: 2,
+  },
+  apiKeyInput: {
+    backgroundColor: tokens.surfaceAlt,
+    borderColor: tokens.lineSoft,
+    borderRadius: 8,
+    borderWidth: 1,
+    color: tokens.ink,
+    fontSize: 14,
+    letterSpacing: 0,
+    minHeight: 46,
+    paddingHorizontal: 12,
+  },
+  settingDivider: {
+    backgroundColor: tokens.lineSoft,
+    height: 1,
+  },
+  settingRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  settingSegments: {
+    backgroundColor: tokens.bgDeep,
+    borderRadius: 8,
+    flexDirection: 'row',
+    padding: 3,
+  },
+  settingSegment: {
+    alignItems: 'center',
+    borderRadius: 6,
+    justifyContent: 'center',
+    minHeight: 32,
+    minWidth: 48,
+    paddingHorizontal: 8,
+  },
+  settingSegmentActive: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderWidth: 1,
+  },
+  settingSegmentText: {
+    color: tokens.muted,
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  settingSegmentTextActive: {
+    color: tokens.ink,
+  },
   permissionList: {
     backgroundColor: tokens.surface,
     borderColor: tokens.line,
@@ -1496,6 +2227,49 @@ const styles = StyleSheet.create({
     color: tokens.muted,
     fontSize: 12,
     letterSpacing: 0,
+    marginTop: 2,
+  },
+  diagnosticList: {
+    backgroundColor: tokens.surface,
+    borderColor: tokens.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  diagnosticRow: {
+    alignItems: 'flex-start',
+    borderBottomColor: tokens.lineSoft,
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 58,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  diagnosticDot: {
+    backgroundColor: tokens.line,
+    borderRadius: 5,
+    height: 10,
+    marginTop: 4,
+    width: 10,
+  },
+  diagnosticDotActive: {
+    backgroundColor: tokens.positive,
+  },
+  diagnosticCopy: {
+    flex: 1,
+  },
+  diagnosticTitle: {
+    color: tokens.ink,
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  diagnosticDetail: {
+    color: tokens.muted,
+    fontSize: 11,
+    letterSpacing: 0,
+    lineHeight: 16,
     marginTop: 2,
   },
   toggle: {

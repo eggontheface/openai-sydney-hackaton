@@ -8,8 +8,10 @@ import type {
   CanonicalType,
   CoachRecommendation,
   DailyMetrics,
+  HealthConnectReadDiagnostic,
   HealthProvider,
   HealthSample,
+  MetricAvailability,
   NutritionDailyRecord,
   PipelineSnapshot,
   SleepSessionRecord,
@@ -93,6 +95,23 @@ export type SyncRunRow = {
   error: string | null;
 };
 
+type HealthConnectDiagnosticRow = {
+  record_type: string;
+  canonical_type: CanonicalType;
+  permission: HealthConnectReadDiagnostic['permission'];
+  read_kind: HealthConnectReadDiagnostic['readKind'];
+  records_read: number;
+  samples_written: number;
+  message: string | null;
+};
+
+type MetricAvailabilityRow = {
+  canonical_type: CanonicalType;
+  sample_count: number;
+  day_count: number;
+  latest_date: string | null;
+};
+
 type DailyMetricsRow = {
   date: string;
   data_completeness: DailyMetrics['dataCompleteness'];
@@ -136,6 +155,15 @@ type DailyMetricsRow = {
   generated_at: string;
 };
 
+type WorkoutSummary = {
+  workout_count: number;
+  run_workout_count: number;
+  ride_workout_count: number;
+  strength_workout_count: number;
+  activity_elapsed_seconds: number | null;
+  activity_kcal: number | null;
+};
+
 let dbPromise: Promise<SQLite.SQLiteDatabase> | undefined;
 
 function bool(value: number | null | undefined): boolean {
@@ -144,6 +172,195 @@ function bool(value: number | null | undefined): boolean {
 
 function optionalNumber(value: number | null | undefined): number | undefined {
   return value == null ? undefined : Number(value);
+}
+
+function numberOrZero(value: number | null | undefined): number {
+  return value == null ? 0 : Number(value);
+}
+
+function timestamp(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function workoutDurationMs(workout: WorkoutRow): number {
+  return Math.max(0, timestamp(workout.end_at) - timestamp(workout.start_at));
+}
+
+function workoutOverlapRatio(a: WorkoutRow, b: WorkoutRow): number {
+  const start = Math.max(timestamp(a.start_at), timestamp(b.start_at));
+  const end = Math.min(timestamp(a.end_at), timestamp(b.end_at));
+  const overlap = Math.max(0, end - start);
+  const shortest = Math.min(workoutDurationMs(a), workoutDurationMs(b));
+  return shortest > 0 ? overlap / shortest : 0;
+}
+
+function compatibleWorkoutSport(a: WorkoutRow, b: WorkoutRow): boolean {
+  return a.sport_bucket === b.sport_bucket || a.sport_bucket === 'other' || b.sport_bucket === 'other';
+}
+
+function isLikelyDuplicateWorkout(a: WorkoutRow, b: WorkoutRow): boolean {
+  if (!compatibleWorkoutSport(a, b)) {
+    return false;
+  }
+
+  const startDeltaMs = Math.abs(timestamp(a.start_at) - timestamp(b.start_at));
+  const endDeltaMs = Math.abs(timestamp(a.end_at) - timestamp(b.end_at));
+  const durationDelta =
+    Math.abs(workoutDurationMs(a) - workoutDurationMs(b)) /
+    Math.max(workoutDurationMs(a), workoutDurationMs(b), 1);
+  const overlapRatio = workoutOverlapRatio(a, b);
+
+  return (
+    (startDeltaMs <= 10 * 60 * 1000 && endDeltaMs <= 10 * 60 * 1000) ||
+    (startDeltaMs <= 15 * 60 * 1000 && overlapRatio >= 0.85 && durationDelta <= 0.25) ||
+    (overlapRatio >= 0.95 && durationDelta <= 0.15)
+  );
+}
+
+function workoutCompletenessScore(workout: WorkoutRow): number {
+  return [
+    workout.route_available ? 8 : 0,
+    workout.distance_km != null ? 6 : 0,
+    workout.active_kcal != null || workout.total_kcal != null ? 4 : 0,
+    workout.avg_hr_bpm != null || workout.max_hr_bpm != null ? 4 : 0,
+    workout.laps_json ? 2 : 0,
+    workout.streams_json ? 2 : 0,
+    workout.name ? 1 : 0,
+    workout.sport_bucket !== 'other' ? 1 : 0,
+  ].reduce((sum, value) => sum + value, 0);
+}
+
+function preferredWorkout(a: WorkoutRow, b: WorkoutRow): WorkoutRow {
+  const scoreDelta = workoutCompletenessScore(b) - workoutCompletenessScore(a);
+  if (scoreDelta !== 0) {
+    return scoreDelta > 0 ? b : a;
+  }
+
+  const durationDelta = numberOrZero(b.elapsed_seconds) - numberOrZero(a.elapsed_seconds);
+  if (durationDelta !== 0) {
+    return durationDelta > 0 ? b : a;
+  }
+
+  return timestamp(b.imported_at) > timestamp(a.imported_at) ? b : a;
+}
+
+function dedupeWorkoutRows(workouts: WorkoutRow[]): WorkoutRow[] {
+  const clusters: { representative: WorkoutRow; rows: WorkoutRow[] }[] = [];
+  const sorted = workouts
+    .slice()
+    .sort((a, b) => timestamp(a.start_at) - timestamp(b.start_at));
+
+  for (const workout of sorted) {
+    const cluster = clusters.find((candidate) =>
+      candidate.rows.some((row) => isLikelyDuplicateWorkout(row, workout)),
+    );
+
+    if (!cluster) {
+      clusters.push({ representative: workout, rows: [workout] });
+      continue;
+    }
+
+    cluster.rows.push(workout);
+    cluster.representative = preferredWorkout(cluster.representative, workout);
+  }
+
+  return clusters
+    .map((cluster) => cluster.representative)
+    .sort((a, b) => timestamp(b.start_at) - timestamp(a.start_at));
+}
+
+function summarizeWorkouts(workouts: WorkoutRow[]): WorkoutSummary {
+  const deduped = dedupeWorkoutRows(workouts);
+  const activityKcal = deduped.reduce(
+    (sum, workout) => sum + numberOrZero(workout.active_kcal),
+    0,
+  );
+
+  return {
+    workout_count: deduped.length,
+    run_workout_count: deduped.filter((workout) => workout.sport_bucket === 'run').length,
+    ride_workout_count: deduped.filter((workout) => workout.sport_bucket === 'ride').length,
+    strength_workout_count: deduped.filter((workout) => workout.sport_bucket === 'strength').length,
+    activity_elapsed_seconds: deduped.length
+      ? deduped.reduce((sum, workout) => sum + numberOrZero(workout.elapsed_seconds), 0)
+      : null,
+    activity_kcal: activityKcal ? activityKcal : null,
+  };
+}
+
+function mergeAvailability(
+  availability: Map<CanonicalType, MetricAvailability>,
+  metric: CanonicalType,
+  values: MetricAvailability,
+) {
+  const current = availability.get(metric);
+  if (!current) {
+    availability.set(metric, values);
+    return;
+  }
+
+  availability.set(metric, {
+    canonicalType: metric,
+    sampleCount: Math.max(current.sampleCount, values.sampleCount),
+    dayCount: Math.max(current.dayCount, values.dayCount),
+    latestDate:
+      !current.latestDate || (values.latestDate && values.latestDate > current.latestDate)
+        ? values.latestDate
+        : current.latestDate,
+  });
+}
+
+function buildMetricAvailability(
+  rows: MetricAvailabilityRow[],
+  workouts: WorkoutRow[],
+  sleepCount: number,
+  nutritionDays: number,
+): MetricAvailability[] {
+  const availability = new Map<CanonicalType, MetricAvailability>();
+
+  rows.forEach((row) => {
+    availability.set(row.canonical_type, {
+      canonicalType: row.canonical_type,
+      sampleCount: Number(row.sample_count),
+      dayCount: Number(row.day_count),
+      latestDate: row.latest_date ?? undefined,
+    });
+  });
+
+  const dedupedWorkouts = dedupeWorkoutRows(workouts);
+  if (dedupedWorkouts.length) {
+    mergeAvailability(availability, 'workout', {
+      canonicalType: 'workout',
+      sampleCount: dedupedWorkouts.length,
+      dayCount: new Set(dedupedWorkouts.map((workout) => workout.local_date)).size,
+      latestDate: dedupedWorkouts[0]?.local_date,
+    });
+  }
+
+  if (sleepCount) {
+    const sleep = availability.get('sleep_session');
+    mergeAvailability(availability, 'sleep_session', {
+      canonicalType: 'sleep_session',
+      sampleCount: Math.max(sleep?.sampleCount ?? 0, sleepCount),
+      dayCount: sleep?.dayCount ?? 0,
+      latestDate: sleep?.latestDate,
+    });
+  }
+
+  if (nutritionDays) {
+    const nutrition = availability.get('nutrition');
+    mergeAvailability(availability, 'nutrition', {
+      canonicalType: 'nutrition',
+      sampleCount: Math.max(nutrition?.sampleCount ?? 0, nutritionDays),
+      dayCount: Math.max(nutrition?.dayCount ?? 0, nutritionDays),
+      latestDate: nutrition?.latestDate,
+    });
+  }
+
+  return [...availability.values()].sort((a, b) =>
+    a.canonicalType.localeCompare(b.canonicalType),
+  );
 }
 
 function toDailyMetrics(row: DailyMetricsRow): DailyMetrics {
@@ -364,6 +581,21 @@ async function createSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       status TEXT NOT NULL,
       error TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS health_connect_diagnostics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sync_started_at TEXT NOT NULL,
+      record_type TEXT NOT NULL,
+      canonical_type TEXT NOT NULL,
+      permission TEXT NOT NULL,
+      read_kind TEXT NOT NULL,
+      records_read INTEGER NOT NULL,
+      samples_written INTEGER NOT NULL,
+      message TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_health_connect_diagnostics_started
+      ON health_connect_diagnostics(sync_started_at);
   `);
 
   const legacyColumns = await db.getAllAsync<{ name: string }>(
@@ -527,6 +759,26 @@ export async function upsertSyncPayload(payload: SyncPayload): Promise<number> {
         importedAt,
       );
     }
+
+    for (const diagnostic of payload.diagnostics) {
+      await txn.runAsync(
+        `
+          INSERT INTO health_connect_diagnostics (
+            sync_started_at, record_type, canonical_type, permission, read_kind,
+            records_read, samples_written, message
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        importedAt,
+        diagnostic.recordType,
+        diagnostic.canonicalType,
+        diagnostic.permission,
+        diagnostic.readKind,
+        diagnostic.recordsRead,
+        diagnostic.samplesWritten,
+        diagnostic.message ?? null,
+      );
+    }
   });
 
   await rebuildDailyMetrics();
@@ -640,6 +892,7 @@ async function rebuildDailyMetrics(): Promise<void> {
     const heartRateMax = await valueFor(db, date, 'heart_rate', 'MAX');
     const restingHr = await valueFor(db, date, 'resting_heart_rate', 'AVG');
     const hrv = await valueFor(db, date, 'hrv_rmssd', 'AVG');
+    const sleepFallback = await valueFor(db, date, 'sleep_session');
     const weightKg = await latestValueFor(db, date, 'weight');
     const bodyFatPct = await latestValueFor(db, date, 'body_fat');
     const leanBodyMassKg = await latestValueFor(db, date, 'lean_body_mass');
@@ -661,27 +914,16 @@ async function rebuildDailyMetrics(): Promise<void> {
       date,
     );
 
-    const workout = await db.getFirstAsync<{
-      workout_count: number;
-      run_workout_count: number;
-      ride_workout_count: number;
-      strength_workout_count: number;
-      activity_elapsed_seconds: number | null;
-      activity_kcal: number | null;
-    }>(
+    const workoutRows = await db.getAllAsync<WorkoutRow>(
       `
-        SELECT
-          COUNT(*) AS workout_count,
-          SUM(CASE WHEN sport_bucket = 'run' THEN 1 ELSE 0 END) AS run_workout_count,
-          SUM(CASE WHEN sport_bucket = 'ride' THEN 1 ELSE 0 END) AS ride_workout_count,
-          SUM(CASE WHEN sport_bucket = 'strength' THEN 1 ELSE 0 END) AS strength_workout_count,
-          SUM(elapsed_seconds) AS activity_elapsed_seconds,
-          SUM(active_kcal) AS activity_kcal
+        SELECT *
         FROM workouts
         WHERE local_date = ?
+        ORDER BY start_at ASC
       `,
       date,
     );
+    const workout = summarizeWorkouts(workoutRows);
 
     const nutrition = await db.getFirstAsync<{
       kcal_in: number | null;
@@ -700,8 +942,10 @@ async function rebuildDailyMetrics(): Promise<void> {
       date,
     );
 
-    const hasSleep = Boolean(sleep?.sleep_seconds);
-    const hasActivity = Boolean(workout?.workout_count);
+    const sleepSeconds = sleep?.sleep_seconds ?? sleepFallback ?? null;
+    const timeInBedSeconds = sleep?.time_in_bed_seconds ?? sleepFallback ?? null;
+    const hasSleep = Boolean(sleepSeconds);
+    const hasActivity = Boolean(workout.workout_count);
     const hasNutrition = Boolean(nutrition);
     const hasSteps = steps != null;
     const hasEnergy = activeKcal != null || totalKcal != null;
@@ -750,20 +994,20 @@ async function rebuildDailyMetrics(): Promise<void> {
       activeKcal ?? null,
       totalKcal ?? null,
       distanceMeters == null ? null : distanceMeters / 1000,
-      sleep?.sleep_seconds ?? null,
-      sleep?.time_in_bed_seconds ?? null,
+      sleepSeconds,
+      timeInBedSeconds,
       sleep?.sleep_efficiency ?? null,
       restingHr ?? null,
       heartRateAvg ?? null,
       heartRateMin ?? null,
       heartRateMax ?? null,
       hrv ?? null,
-      workout?.workout_count ?? 0,
-      workout?.run_workout_count ?? 0,
-      workout?.ride_workout_count ?? 0,
-      workout?.strength_workout_count ?? 0,
-      workout?.activity_elapsed_seconds ?? null,
-      workout?.activity_kcal ?? null,
+      workout.workout_count,
+      workout.run_workout_count,
+      workout.ride_workout_count,
+      workout.strength_workout_count,
+      workout.activity_elapsed_seconds,
+      workout.activity_kcal,
       nutrition?.kcal_in ?? null,
       nutrition?.protein_g ?? null,
       nutrition?.carbs_g ?? null,
@@ -915,12 +1159,49 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
   const db = await getDb();
   await rebuildDailyMetrics();
 
-  const [countRow, workoutCountRow, sleepCountRow, nutritionCountRow] = await Promise.all([
+  const [
+    countRow,
+    workoutRows,
+    sleepCountRow,
+    nutritionCountRow,
+    coverageRow,
+    availabilityRows,
+  ] = await Promise.all([
     db.getFirstAsync<{ total: number }>('SELECT COUNT(*) AS total FROM health_samples'),
-    db.getFirstAsync<{ total: number }>('SELECT COUNT(*) AS total FROM workouts'),
+    db.getAllAsync<WorkoutRow>('SELECT * FROM workouts ORDER BY start_at ASC'),
     db.getFirstAsync<{ total: number }>('SELECT COUNT(*) AS total FROM sleep_sessions'),
     db.getFirstAsync<{ total: number }>('SELECT COUNT(*) AS total FROM nutrition_daily'),
+    db.getFirstAsync<{ total: number }>(
+      'SELECT COUNT(*) AS total FROM daily_metrics WHERE source_count > 0',
+    ),
+    db.getAllAsync<MetricAvailabilityRow>(`
+      SELECT
+        canonical_type,
+        COUNT(*) AS sample_count,
+        COUNT(DISTINCT local_date) AS day_count,
+        MAX(local_date) AS latest_date
+      FROM health_samples
+      GROUP BY canonical_type
+    `),
   ]);
+  const dedupedWorkoutCount = dedupeWorkoutRows(workoutRows).length;
+  const sleepCount = Number(sleepCountRow?.total ?? 0);
+  const nutritionDays = Number(nutritionCountRow?.total ?? 0);
+  const metricAvailability = buildMetricAvailability(
+    availabilityRows,
+    workoutRows,
+    sleepCount,
+    nutritionDays,
+  );
+  const diagnosticRows = await db.getAllAsync<HealthConnectDiagnosticRow>(`
+    SELECT record_type, canonical_type, permission, read_kind, records_read, samples_written, message
+    FROM health_connect_diagnostics
+    WHERE sync_started_at = (
+      SELECT MAX(sync_started_at)
+      FROM health_connect_diagnostics
+    )
+    ORDER BY canonical_type ASC, read_kind ASC, record_type ASC
+  `);
 
   const rows = await db.getAllAsync<DailyMetricsRow>(`
     SELECT *
@@ -936,9 +1217,20 @@ export async function getPipelineSnapshot(): Promise<PipelineSnapshot> {
 
   return {
     totalSamples: Number(countRow?.total ?? 0),
-    workoutCount: Number(workoutCountRow?.total ?? 0),
-    sleepCount: Number(sleepCountRow?.total ?? 0),
-    nutritionDays: Number(nutritionCountRow?.total ?? 0),
+    workoutCount: dedupedWorkoutCount,
+    sleepCount,
+    nutritionDays,
+    coverageDays: Number(coverageRow?.total ?? 0),
+    metricAvailability,
+    latestDiagnostics: diagnosticRows.map((row) => ({
+      recordType: row.record_type,
+      canonicalType: row.canonical_type,
+      permission: row.permission,
+      readKind: row.read_kind,
+      recordsRead: Number(row.records_read),
+      samplesWritten: Number(row.samples_written),
+      message: row.message ?? undefined,
+    })),
     today,
     history,
     recentWorkouts: recentWorkouts.map((row) => ({
@@ -1005,15 +1297,15 @@ export async function getRecentSamples(limit = 12): Promise<HealthSampleRow[]> {
 
 export async function getRecentWorkouts(limit = 5): Promise<WorkoutRow[]> {
   const db = await getDb();
-  return db.getAllAsync<WorkoutRow>(
+  const rows = await db.getAllAsync<WorkoutRow>(
     `
       SELECT *
       FROM workouts
       ORDER BY start_at DESC
-      LIMIT ?
     `,
-    limit,
   );
+
+  return dedupeWorkoutRows(rows).slice(0, limit);
 }
 
 export async function clearPipeline(): Promise<void> {
@@ -1025,12 +1317,13 @@ export async function clearPipeline(): Promise<void> {
     DELETE FROM nutrition_daily;
     DELETE FROM daily_metrics;
     DELETE FROM sync_runs;
+    DELETE FROM health_connect_diagnostics;
   `);
 }
 
 export async function exportPipelineJson(): Promise<string> {
   const db = await getDb();
-  const [samples, sleepSessions, workouts, nutritionDaily, dailyMetrics, syncRuns] =
+  const [samples, sleepSessions, workouts, nutritionDaily, dailyMetrics, syncRuns, diagnostics] =
     await Promise.all([
       db.getAllAsync<HealthSampleRow>('SELECT * FROM health_samples ORDER BY start_at ASC'),
       db.getAllAsync<SleepSessionRow>('SELECT * FROM sleep_sessions ORDER BY start_at ASC'),
@@ -1038,6 +1331,7 @@ export async function exportPipelineJson(): Promise<string> {
       db.getAllAsync('SELECT * FROM nutrition_daily ORDER BY date ASC'),
       db.getAllAsync<DailyMetricsRow>('SELECT * FROM daily_metrics ORDER BY date ASC'),
       db.getAllAsync<SyncRunRow>('SELECT * FROM sync_runs ORDER BY started_at ASC'),
+      db.getAllAsync('SELECT * FROM health_connect_diagnostics ORDER BY sync_started_at ASC'),
     ]);
 
   const payload = {
@@ -1049,6 +1343,7 @@ export async function exportPipelineJson(): Promise<string> {
     nutritionDaily,
     dailyMetrics,
     syncRuns,
+    diagnostics,
   };
 
   const directory = FileSystem.documentDirectory;
